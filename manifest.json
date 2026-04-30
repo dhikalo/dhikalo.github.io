@@ -1,0 +1,17 @@
+{
+  "name": "Bodenwiderstandsmessung-GUI",
+  "short_name": "Bodenwiderstand",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#3b82f6",
+  "description": "High-performance field auditing and soil resistance management.",
+  "icons": [
+    {
+      "src": "app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
