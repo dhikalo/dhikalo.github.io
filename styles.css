@@ -33,8 +33,9 @@ body {
     font-family: var(--font-display);
     background: var(--bg-app);
     color: var(--text-primary);
-    height: 100vh;
-    overflow: hidden;
+    min-height: 100vh;
+    overflow: auto;
+    -webkit-text-size-adjust: 100%;
     /* Noise and Grid Background */
     background-image: 
         linear-gradient(rgba(0, 242, 255, 0.03) 1px, transparent 1px),

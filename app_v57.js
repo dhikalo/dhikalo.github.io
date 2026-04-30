@@ -58,7 +58,7 @@ const AppState = {
     userMarker: null,
     drawItems: null,
     activeDrawTool: null,
-    hiddenMapColors: new Set(['#00ffff'])
+    hiddenMapColors: new Set([])
 };
 
 // GLOBAL ZOOM HANDLER (Full Layout Scale)
