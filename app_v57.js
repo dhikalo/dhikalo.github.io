@@ -50,16 +50,16 @@ const AppState = {
     selectedCell: null,
     columnWidths: {},
     activeColor: '#FF00FF',
-    liveFollow: true,      // ✔ Enabled by default for automatic tracking experience
+    liveFollow: false,      // ✔ Manual by default: wait for user to click Standortermittlung
     newCols: new Set(),
     filters: {
         'Kennzeichen': ''
     },
     userMarker: null,
     drawItems: null,
-    activeDrawTool: null,
     hiddenMapColors: new Set([]),
-    watchId: null // Store GPS watch ID for live tracking
+    watchId: null,
+    firstLocationFound: false // Critical for initial zoom
 };
 
 // GLOBAL ZOOM HANDLER (Full Layout Scale)
@@ -395,9 +395,10 @@ function initUI() {
 
     safeOn('btnLocateMe', 'click', () => {
         if(!map) return;
-        AppState.liveFollow = !AppState.liveFollow;
-        showToast(AppState.liveFollow ? "🛰️ Live-Verfolgung: EIN" : "🛰️ Live-Verfolgung: AUS");
-        if(AppState.liveFollow) startLiveTracking();
+        AppState.liveFollow = true; 
+        AppState.firstLocationFound = false; // Reset to trigger zoom-in effect
+        showToast("🛰️ Fokus ke lokasi Anda (Zoom-In)...");
+        startLiveTracking();
     });
 
     function initCompass() {
@@ -853,105 +854,16 @@ function initMap() {
     // RESTORE SAVED DRAWINGS
     restoreMapDrawings();
 
-    // AUTO-START Standortermittlung if liveFollow is true
+    // AUTO-START GPS WATCHING
     if (AppState.liveFollow) {
-        map.locate({
-            watch: true, 
-            enableHighAccuracy: true,
-            maximumAge: 5000,
-            timeout: 30000
-        });
-        showToast('📍 Live-Verfolgung: AUTOMATISCH GESTARTET');
+        startLiveTracking();
     }
-
-    map.on('locationfound', (e) => {
-        const radius = e.accuracy / 2;
-        const latlng = e.latlng;
-        
-        if (AppState.userMarker) map.removeLayer(AppState.userMarker);
-        if (AppState.accuracyCircle) map.removeLayer(AppState.accuracyCircle);
-
-        // "Fat" Person Icon for User Location (Circle with Person inside)
-        const userIcon = L.divIcon({
-            html: `<div class="user-location-pulse" style="background: #3b82f6; width: 34px; height: 34px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 15px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center;">
-                     <i class="fas fa-user" style="color: white; font-size: 18px;"></i>
-                   </div>`,
-            iconSize: [34, 34], iconAnchor: [17, 17], className: 'user-icon'
-        });
-
-        AppState.userMarker = L.marker(latlng, { icon: userIcon, zIndexOffset: 2000 }).addTo(map);
-        AppState.accuracyCircle = L.circle(latlng, 5, { // SHRUNK TO 5m - FIXED SMALL CIRCLE
-            color: '#3b82f6', fillColor: 'transparent', weight: 1, opacity: 0.5
-        }).addTo(map);
-
-        if(!AppState.firstLocationFound) {
-            map.flyTo(latlng, 18, { animate: true, duration: 1.5 }); // Cinematic Zoom-In
-            AppState.firstLocationFound = true;
-            showToast("📍 Standort fixiert & Zoom aktiv");
-        } else if(AppState.liveFollow) {
-            map.panTo(latlng);
-        }
-        showToast("✓ Standort gefunden!");
-
-        // Update Professional Status Bar
-        const statusText = document.getElementById('gpsStatusText');
-        const statusDot = document.getElementById('gpsAccuracyDot');
-        const distanceBadge = document.getElementById('distanceBadge');
-        const distanceValue = document.getElementById('distanceValue');
-        const acc = Math.round(e.accuracy);
-        
-        if(statusText) statusText.innerText = `GPS: ${acc}m`;
-        if(statusDot) {
-            statusDot.style.background = acc < 10 ? '#10b981' : (acc < 30 ? '#f59e0b' : '#ef4444');
-            statusDot.classList.add('pulse');
-        }
-
-        // Live Distance Calculation
-        if (AppState.startPoint && distanceBadge && distanceValue) {
-            const dist = map.distance(latlng, AppState.startPoint);
-            distanceValue.innerText = dist.toFixed(1);
-            distanceBadge.style.display = 'flex';
-        }
-
-        if (!AppState.userMarker) {
-            const userIcon = L.divIcon({ 
-                html: '<div class="user-location-wrapper"><div id="userHeadingBeam" class="user-heading-beam"></div><div class="user-dot"></div></div>', 
-                iconSize: [40, 40], iconAnchor: [20, 20] 
-            });
-            AppState.userMarker = L.marker(latlng, { 
-                icon: userIcon, 
-                zIndexOffset: 2000,
-                draggable: true 
-            }).addTo(map);
-
-            // First time found: Zoom in
-            map.setView(latlng, 19);
-        } else {
-            AppState.userMarker.setLatLng(latlng);
-        }
-        
-        // ONLY follow if liveFollow is active
-        if (AppState.liveFollow) {
-            map.panTo(latlng, { animate: true });
-        }
-    });
 
     map.on('dragstart', () => {
         if(AppState.liveFollow) {
             AppState.liveFollow = false;
             showToast("Auto-Follow AUS (Manueller Modus)");
         }
-    });
-
-    map.on('locationerror', (e) => {
-        let msg = "GPS Fehler: ";
-        if (e.code === 1) msg += "Berechtigung verweigert. Bitte Standortfreigabe erlauben!";
-        else if (e.code === 2) msg += "Position nicht verfügbar. Bitte prüfen ob GPS aktiviert ist.";
-        else if (e.code === 3) msg += "Zeitüberschreitung. GPS-Signal schwach — bitte draußen versuchen.";
-        else msg += e.message;
-        
-        showToast(`⚠️ ${msg}`, 6000);
-        console.error("Location Error:", e);
     });
 
     window.addEventListener('deviceorientationabsolute', (e) => {
@@ -2538,8 +2450,13 @@ function updateUserMarker(lat, lng, accuracy) {
         dot.style.background = accuracy < 10 ? '#39ff14' : (accuracy < 30 ? '#ff8c00' : '#ef4444');
     }
 
-    // Auto-Follow Logic
+    // Auto-Follow Logic: Center and Zoom In for precision
     if (AppState.liveFollow) {
-        map.panTo(latlng, { animate: true });
+        if (!AppState.firstLocationFound) {
+            map.setView(latlng, 19, { animate: true });
+            AppState.firstLocationFound = true;
+        } else {
+            map.panTo(latlng, { animate: true });
+        }
     }
 }
