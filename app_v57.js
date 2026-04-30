@@ -29,7 +29,7 @@ const COLUMN_UNITS = {
 };
 
 const DEPTH_COLORS = {
-    'basis': { bg: 'rgba(230, 237, 243, 0.05)', border: '#30363d', text: '#e6edf3' },
+    'basis': { bg: 'rgba(230, 237, 243, 0.1)', border: '#8b949e', text: '#e6edf3' },
     '08': { bg: 'rgba(255, 0, 255, 0.1)', border: '#ff00ff', text: '#ff00ff' },
     '16': { bg: 'rgba(255, 255, 0, 0.1)', border: '#ffff00', text: '#ffff00' },
     '32': { bg: 'rgba(0, 255, 255, 0.1)', border: '#00ffff', text: '#00ffff' },
@@ -40,7 +40,7 @@ const DEPTH_COLORS = {
     'widerstand': { bg: 'rgba(188, 19, 254, 0.1)', border: '#bc13fe', text: '#bc13fe' },
     'audit': { bg: 'rgba(230, 237, 243, 0.05)', border: '#8b949e', text: '#8b949e' },
     'special': { bg: 'rgba(0, 242, 255, 0.05)', border: '#00f2ff', text: '#00f2ff' },
-    'anhang_global': { bg: 'rgba(255, 255, 255, 0.05)', border: '#ffffff', text: '#ffffff' }
+    'anhang_global': { bg: 'rgba(255, 255, 255, 0.1)', border: '#ffffff', text: '#ffffff' }
 };
 
 const AppState = {
@@ -1513,6 +1513,12 @@ function renderTable(onlyBody = false) {
                 
                 groupCols.forEach((c, cIdx) => {
                     const sh = document.createElement('th'); sh.style.position = 'relative';
+                    sh.style.backgroundColor = cs.bg;
+                    sh.style.color = cs.text;
+                    
+                    // Add colored underline for ALL headers to show categories clearly
+                    sh.style.borderBottom = `3px solid ${cs.border}`;
+                    
                     if (cIdx === 0) sh.style.borderLeft = `4px solid ${cs.border}`;
                     sh.style.minWidth = AppState.columnWidths[c] || '80px';
                     const label = document.createElement('span');
@@ -1559,19 +1565,27 @@ function renderTable(onlyBody = false) {
     filteredData.forEach((row) => {
         const tr = document.createElement('tr');
         const idx = row._originalIndex;
-        const originalRow = AppState.data[idx]; // GET DIRECT REFERENCE
+        const originalRow = AppState.data[idx];
         tr.innerHTML = `<td style="border-right: 3px solid #3b82f6; background: #f8fafc; color: #1e293b; font-weight: 900; text-align: center;">${idx + 1}</td>`;
+        
         TABLE_STRUCTURE.forEach(g => {
             if (AppState.hiddenColumns.has(g.class)) return;
             const groupCols = g.columns.filter(c => !AppState.hiddenColumns.has(c));
+            const cs = DEPTH_COLORS[g.class] || { bg: 'transparent', border: '#3b82f6' };
+            
             groupCols.forEach((col, colIdx) => {
                 const td = document.createElement('td');
-                const cs = DEPTH_COLORS[g.class] || { bg: '#f3f4f6', border: '#3b82f6' };
+                const cs = DEPTH_COLORS[g.class] || { bg: 'transparent', border: '#3b82f6' };
+                
+                td.style.backgroundColor = 'transparent';
+                // Professional white-ish separator for data rows
+                td.style.borderBottom = '1px solid rgba(255,255,255,0.15)';
+                
                 if (colIdx === 0) td.style.borderLeft = `4px solid ${cs.border}`;
+                
                 if(col.toLowerCase().includes('anhang')) {
                     td.style.padding = '0';
                     td.style.borderRight = `1px solid rgba(255,255,255,0.05)`;
-                    td.style.backgroundColor = 'rgba(255,255,255,0.02)';
                     
                     const wrapper = document.createElement('div');
                     wrapper.style.display = 'flex';
@@ -1581,6 +1595,7 @@ function renderTable(onlyBody = false) {
                     wrapper.style.height = '32px';
                     wrapper.style.width = '100%';
                     wrapper.style.whiteSpace = 'nowrap';
+                    wrapper.style.backgroundColor = 'rgba(255,255,255,0.02)';
 
                     if(originalRow[col]) {
                         const b = document.createElement('button'); 
@@ -1610,20 +1625,29 @@ function renderTable(onlyBody = false) {
                     td.appendChild(wrapper);
                 } else {
                     const inp = document.createElement('input');
-                    inp.type = 'text'; inp.value = originalRow[col] || ""; inp.className = 'cell-input';
+                    inp.type = 'text'; 
+                    inp.value = originalRow[col] || ""; 
+                    inp.className = 'cell-input';
                     inp.style.color = '#ffffff';
-                    if (originalRow._isNew || AppState.newCols.has(col)) inp.style.backgroundColor = 'rgba(210, 180, 140, 0.45)';
+                    inp.style.backgroundColor = 'transparent';
+                    
+                    if (originalRow._isNew || AppState.newCols.has(col)) {
+                        inp.style.backgroundColor = 'rgba(210, 180, 140, 0.3)';
+                    }
+
                     inp.dataset.col = col;
                     inp.dataset.row = idx;
                     if (typeof cellFormatting !== 'undefined' && cellFormatting[`${idx}-${col}`]) {
                         if (typeof applyFormattingToCell === 'function') applyFormattingToCell(inp, cellFormatting[`${idx}-${col}`]);
                     }
                     if (col.startsWith('ρ') || col.startsWith('MW') || col.startsWith('SD')) {
-                        inp.readOnly = true; inp.style.background = 'rgba(255,255,255,0.03)'; inp.style.fontWeight = '700';
+                        inp.readOnly = true; 
+                        inp.style.background = 'rgba(255,255,255,0.03)'; 
+                        inp.style.fontWeight = '700';
                     }
                     inp.onfocus = () => AppState.selectedCell = `${idx}-${col}`;
                     inp.oninput = (e) => {
-                        originalRow[col] = e.target.value; // SAVE TO REAL DATA
+                        originalRow[col] = e.target.value;
                         updateLiveCalculations(originalRow, col, tr);
                         saveToStorage();
                     };
