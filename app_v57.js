@@ -50,7 +50,7 @@ const AppState = {
     selectedCell: null,
     columnWidths: {},
     activeColor: '#FF00FF',
-    liveFollow: false,      // ✔ Disable by default to prevent map jumps
+    liveFollow: true,      // ✔ Enabled by default for automatic tracking experience
     newCols: new Set(),
     filters: {
         'Kennzeichen': ''
@@ -58,7 +58,8 @@ const AppState = {
     userMarker: null,
     drawItems: null,
     activeDrawTool: null,
-    hiddenMapColors: new Set([])
+    hiddenMapColors: new Set([]),
+    watchId: null // Store GPS watch ID for live tracking
 };
 
 // GLOBAL ZOOM HANDLER (Full Layout Scale)
@@ -275,7 +276,11 @@ function initUI() {
                     map.setView(map.getCenter(), map.getZoom(), { animate: false });
                     setTimeout(() => map.invalidateSize(), 500);
                     refreshMapVisibility(); // ✔ Sync visibility on load
-                    showToast("Karte & Audit geladen ✓");
+                    
+                    // AUTO-START GPS WATCHING
+                    startLiveTracking(); 
+                    
+                    showToast("Karte & Audit geladen ✓ (GPS Aktiv)");
                 }
             }, 300);
         }
@@ -390,10 +395,9 @@ function initUI() {
 
     safeOn('btnLocateMe', 'click', () => {
         if(!map) return;
-        showToast("🛰️ Standort-Suche aktiv...");
-        AppState.firstLocationFound = false; // Center ONCE on next find
-        map.locate({ setView: false, maxZoom: 18, enableHighAccuracy: true, watch: true, timeout: 30000 });
-        initCompass(); 
+        AppState.liveFollow = !AppState.liveFollow;
+        showToast(AppState.liveFollow ? "🛰️ Live-Verfolgung: EIN" : "🛰️ Live-Verfolgung: AUS");
+        if(AppState.liveFollow) startLiveTracking();
     });
 
     function initCompass() {
@@ -2486,4 +2490,56 @@ function toggleColumnGroup(cls, groupName) {
     renderTable();
     saveToStorage();
     openColManager(); // Re-render modal to show new state
+}
+function startLiveTracking() {
+    if (!navigator.geolocation) return;
+    if (AppState.watchId) navigator.geolocation.clearWatch(AppState.watchId);
+    
+    AppState.watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+            const { latitude, longitude, accuracy } = pos.coords;
+            updateUserMarker(latitude, longitude, accuracy);
+        },
+        (err) => {
+            console.warn("GPS Error:", err);
+            const statusText = document.getElementById('gpsStatusText');
+            if(statusText) statusText.innerText = "GPS-Signal schwach";
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+    );
+}
+
+function updateUserMarker(lat, lng, accuracy) {
+    if (!map) return;
+    const latlng = [lat, lng];
+
+    if (!layers.userLocation) {
+        layers.userLocation = L.layerGroup().addTo(map);
+    }
+    layers.userLocation.clearLayers();
+
+    // Blue Accuracy Circle
+    L.circle(latlng, { radius: accuracy, color: '#3b82f6', fillOpacity: 0.1, weight: 1 }).addTo(layers.userLocation);
+    
+    // Core User Dot
+    const userMarker = L.circleMarker(latlng, {
+        radius: 8,
+        fillColor: '#3b82f6',
+        color: '#fff',
+        weight: 2,
+        fillOpacity: 1
+    }).addTo(layers.userLocation);
+
+    // Update Dashboard UI
+    const statusText = document.getElementById('gpsStatusText');
+    const dot = document.getElementById('gpsAccuracyDot');
+    if (statusText) statusText.innerText = `GPS Aktiv (${accuracy.toFixed(1)}m)`;
+    if (dot) {
+        dot.style.background = accuracy < 10 ? '#39ff14' : (accuracy < 30 ? '#ff8c00' : '#ef4444');
+    }
+
+    // Auto-Follow Logic
+    if (AppState.liveFollow) {
+        map.panTo(latlng, { animate: true });
+    }
 }
