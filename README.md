@@ -37,4 +37,3 @@ messstellen-manager/
 - Browser Cache löschen: Drücken Sie `Ctrl+F5` beim ersten Öffnen
 - Bodenwiderstand: Wird AUTOMATISCH ausgewählt und grün markiert
 
-**Viel Erfolg!** 🎉
