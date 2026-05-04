@@ -35,7 +35,7 @@
     <meta name="apple-mobile-web-app-title" content="Messstellen">
     <link rel="apple-touch-icon" href="app-icon.png">
 
-    <link rel="stylesheet" href="styles.css?v=107">
+    <link rel="stylesheet" href="styles.css?v=200">
 </head>
 
     <!-- High-End Welcome Overlay -->
@@ -68,44 +68,53 @@
         <!-- Header -->
         <header class="header-top">
             <div class="header-left">
-                <button class="btn-modern btn-accent" id="btnHome" title="Zur Startseite"><i class="fas fa-home"></i> <span>Home</span></button>
-
-                <button class="btn-modern btn-accent" id="btnBrowse"><i class="fas fa-file-upload"></i> <span>Datei
-                        öffnen</span></button>
-                <button class="btn-modern btn-accent" id="btnStartBlank"><i class="fas fa-play"></i>
-                    <span>Starten</span></button>
+                <button class="btn-modern btn-accent" id="btnHome" title="Zur Startseite"><i class="fas fa-home"></i> <span>STARTSEITE</span></button>
+                <button class="btn-modern btn-accent" id="btnBrowse" title="Datei öffnen"><i class="fas fa-file-upload"></i> <span>DATEI ÖFFNEN</span></button>
+                <button class="btn-modern btn-accent" id="btnStartBlank" title="Starten"><i class="fas fa-play"></i> <span>STARTEN</span></button>
+                
+                <div style="width: 1px; height: 20px; background: rgba(255,255,255,0.2); margin: 0 5px;"></div>
+                
+                <button class="btn-modern" id="btnUndo" title="Rückgängig"><i class="fas fa-undo"></i></button>
+                <button class="btn-modern" id="btnRedo" title="Wiederholen"><i class="fas fa-redo"></i></button>
+                <button class="btn-modern btn-accent" id="btnColManager" title="Spalten-Verwaltung"><i class="fas fa-columns"></i> <span>VERWALTUNG</span></button>
             </div>
             <div class="header-center">
                 <div class="standort-container">
-                    <input type="text" id="projectName" placeholder="Standort eingeben..."
-                        value="Bodenwiderstandsmessung-GUI">
+                    <input type="text" id="projectName" placeholder="Standort eingeben..." value="Bodenwiderstandsmessung-GUI">
                 </div>
             </div>
             <div class="header-right">
-                <button class="btn-modern btn-accent" id="btnOpenProjects"><i class="fas fa-folder-open"></i> Projekte</button>
-                <button class="btn-modern btn-accent btn-success" id="btnSaveAll" style="background: #059669; border-color: #059669;"><i class="fas fa-save"></i> <span>Speichern</span></button>
-                <button class="btn-modern btn-accent" id="btnExportExcel"><i class="fas fa-file-excel"></i> <span>Excel speichern</span></button>
+                <button class="btn-modern btn-accent" id="btnOpenProjects" title="Projekte"><i class="fas fa-folder-open"></i> <span>PROJEKTE</span></button>
+                <button class="btn-modern btn-success" id="btnSaveAll" title="Speichern"><i class="fas fa-save"></i> <span>SPEICHERN</span></button>
+                <button class="btn-modern btn-accent" id="btnExportExcel" title="Excel Export"><i class="fas fa-file-excel"></i> <span>EXCEL</span></button>
             </div>
         </header>
 
+        <!-- Main Actions / Tab Bar -->
+        <section class="action-bar" style="display: flex; gap: 10px; padding: 0 40px; margin-top: 5px;">
+            <button class="btn-modern btn-accent active" style="flex: 1; justify-content: center;" id="btnTabTable" onclick="switchTab('table')"><i class="fas fa-table"></i> TABELLE</button>
+            <button class="btn-modern btn-accent" style="flex: 1; justify-content: center;" id="btnTabPlot" onclick="switchTab('plot')"><i class="fas fa-chart-bar"></i> STATISTIK</button>
+            <button class="btn-modern btn-accent" style="flex: 1; justify-content: center;" id="btnToggleMap"><i class="fas fa-map-marked-alt"></i> KARTE</button>
+        </section>
 
-
-        <!-- Formatting Toolbar -->
+        <!-- Formatting Toolbar (MATCHING IMAGE) -->
         <section class="toolbar-formatting">
             <div class="format-group">
-                <span class="group-label">Spalte</span>
+                <span class="group-label">SPALTE</span>
                 <div class="control-pill">
-                    <button class="pill-btn plus" id="btnAddCol"><i class="fas fa-plus"></i></button>
-                    <button class="pill-btn minus" id="btnDeleteCol"><i class="fas fa-minus"></i></button>
+                    <button class="pill-btn" id="btnAddCol"><i class="fas fa-plus"></i></button>
+                    <button class="pill-btn" id="btnDeleteCol"><i class="fas fa-minus"></i></button>
                 </div>
             </div>
+
             <div class="format-group">
-                <span class="group-label">Zeile</span>
+                <span class="group-label">ZEILE</span>
                 <div class="control-pill">
-                    <button class="pill-btn plus" id="btnAddRow"><i class="fas fa-plus"></i></button>
-                    <button class="pill-btn minus" id="btnDeleteRow"><i class="fas fa-minus"></i></button>
+                    <button class="pill-btn" id="btnAddRow"><i class="fas fa-plus"></i></button>
+                    <button class="pill-btn" id="btnDeleteRow"><i class="fas fa-minus"></i></button>
                 </div>
             </div>
+
             <div class="format-group">
                 <span class="group-label">BEARBEITUNG</span>
                 <div class="format-tools">
@@ -118,41 +127,60 @@
                     <button class="tool-icon-btn" id="btnAlignCenter"><i class="fas fa-align-center"></i></button>
                     <button class="tool-icon-btn" id="btnAlignRight"><i class="fas fa-align-right"></i></button>
                 </div>
-                <button class="btn-modern" id="btnBgColor" title="Hintergrundfarbe"><i
-                        class="fas fa-fill-drip"></i></button>
+                <button class="tool-icon-btn" id="btnBgColor" title="Farbe"><i class="fas fa-fill-drip"></i></button>
             </div>
-            <div class="format-group">
-                <span class="group-label">Ansicht</span>
-                <div class="control-pill">
-                    <button class="pill-btn minus" onclick="handleZoom(-10)"><i class="fas fa-search-minus"></i></button>
-                    <span id="zoomLevelDisplay" style="font-size: 10px; font-weight: 800; color: var(--accent-primary); width: 35px; text-align: center;">100%</span>
-                    <button class="pill-btn plus" onclick="handleZoom(10)"><i class="fas fa-search-plus"></i></button>
-                </div>
-                <button class="btn-modern" id="btnRefreshTable" title="Tabelle aktualisieren" style="margin-left: 10px; padding: 4px 10px; border-color: var(--accent-primary); color: var(--accent-primary); font-size: 9px;"><i class="fas fa-sync-alt"></i> <span>Refresh</span></button>
-            </div>
-        </section>
 
-        <!-- Main Actions -->
-        <section class="action-bar" style="display: flex; gap: 10px;">
-            <button class="btn-modern btn-accent" style="flex: 1; justify-content: center;" id="btnColManager"><i
-                    class="fas fa-columns"></i> Spalten</button>
-            <button class="btn-modern btn-accent" style="flex: 1; justify-content: center;" id="btnToggleMap"><i
-                    class="fas fa-map-marked-alt"></i> Karte</button>
+            <div class="format-group">
+                <span class="group-label">ANSICHT</span>
+                <div class="control-pill" style="min-width: 120px;">
+                    <button class="pill-btn" onclick="handleZoom(-10)"><i class="fas fa-minus"></i></button>
+                    <span id="zoomLevelDisplay" style="font-family: var(--font-data); font-size: 11px; font-weight: 800; color: #fff; width: 45px; text-align: center;">100%</span>
+                    <button class="pill-btn" onclick="handleZoom(10)"><i class="fas fa-plus"></i></button>
+                </div>
+                <button class="btn-refresh-outlined" id="btnRefreshTable">
+                    <i class="fas fa-sync-alt"></i> <span>REFRESH</span>
+                </button>
+            </div>
         </section>
 
         <!-- Main Workspace -->
         <main class="content-viewport">
-            <div class="table-wrapper">
-                <table class="modern-table" id="mainTable">
-                    <thead id="tableHead"></thead>
-                    <tbody id="tableBody"></tbody>
-                </table>
-                <div id="emptyState" class="empty-state"
-                    style="display:none; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); padding: 50px;">
-                    <i class="fas fa-layer-group"
-                        style="font-size: 64px; margin-bottom: 20px; color: var(--accent-primary); opacity: 0.5;"></i>
-                    <h2>Bereit für High-End Messungen</h2>
-                    <p>Wählen Sie "Datei öffnen" oder "Starten", um zu beginnen.</p>
+
+            <!-- TAB: TABLE -->
+            <div id="tabTable" class="tab-content active">
+                <div class="table-wrapper">
+                    <table class="modern-table" id="mainTable">
+                        <thead id="tableHead"></thead>
+                        <tbody id="tableBody"></tbody>
+                    </table>
+                    <div id="emptyState" class="empty-state"
+                        style="display:none; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); padding: 50px;">
+                        <i class="fas fa-layer-group"
+                            style="font-size: 64px; margin-bottom: 20px; color: var(--accent-primary); opacity: 0.5;"></i>
+                        <h2>Bereit für High-End Messungen</h2>
+                        <p>Wählen Sie "Datei öffnen" oder "Starten", um zu beginnen.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: PLOT -->
+            <div id="tabPlot" class="tab-content">
+                <div style="padding: 20px;">
+                    <div class="sidebar-title" style="color: #3b82f6; letter-spacing: 2px; font-size: 14px; margin-bottom: 20px; text-align: center;">MESSDATEN-ANALYSE</div>
+                    
+                    <!-- Plot Controls (Modern Toggle Switch Style) -->
+                    <div style="display: flex; justify-content: center; gap: 30px; margin-bottom: 30px;">
+                        <div class="control-pill" style="background: rgba(255,255,255,0.05); padding: 5px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); display: flex; gap: 5px;">
+                            <button id="btnChartBalken" class="pill-btn active" style="min-width: 100px; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 800; letter-spacing: 1px;">BALKEN</button>
+                            <button id="btnChartScatter" class="pill-btn" style="min-width: 100px; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 800; letter-spacing: 1px;">SCATTER</button>
+                        </div>
+                        <div class="control-pill" style="background: rgba(255,255,255,0.05); padding: 5px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); display: flex; gap: 5px;">
+                            <button id="btnStdOn" class="pill-btn" style="min-width: 100px; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 800; letter-spacing: 1px;">STD EIN</button>
+                            <button id="btnStdOff" class="pill-btn active" style="min-width: 100px; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 800; letter-spacing: 1px;">STD AUS</button>
+                        </div>
+                    </div>
+
+                    <div id="appPlotContainer" style="background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 15px; min-height: 400px; padding: 20px;"></div>
                 </div>
             </div>
 
@@ -320,7 +348,6 @@
                     <div style="width:16px;height:16px;border-radius:50%;background:#ff00ff;box-shadow:0 0 10px #ff00ff;"></div>
                     <div>
                         <div style="font-weight:700; font-size:14px; color:#ff00ff;">0.8 m</div>
-                        <div style="font-size:11px; color:#94a3b8;">Pink — R1, R2, R3, ρ1, ρ2, ρ3, MW, SD, Anhang</div>
                     </div>
                 </label>
 
@@ -330,7 +357,6 @@
                     <div style="width:16px;height:16px;border-radius:50%;background:#ffff00;box-shadow:0 0 10px #ffff00;"></div>
                     <div>
                         <div style="font-weight:700; font-size:14px; color:#ffff00;">1.6 m</div>
-                        <div style="font-size:11px; color:#94a3b8;">Gelb — R1, R2, R3, ρ1, ρ2, ρ3, MW, SD, Anhang</div>
                     </div>
                 </label>
 
@@ -340,7 +366,6 @@
                     <div style="width:16px;height:16px;border-radius:50%;background:#00ffff;box-shadow:0 0 10px #00ffff;"></div>
                     <div>
                         <div style="font-weight:700; font-size:14px; color:#00ffff;">3.2 m</div>
-                        <div style="font-size:11px; color:#94a3b8;">Cyan — R1, R2, R3, ρ1, ρ2, ρ3, MW, SD, Anhang</div>
                     </div>
                 </label>
             </div>
@@ -416,7 +441,7 @@
             });
         }
     </script>
-    <script src="app_v57.js?v=117"></script>
+    <script src="app_v57.js?v=201"></script>
 </body>
 
 </html>

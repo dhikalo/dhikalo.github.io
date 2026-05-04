@@ -2,6 +2,7 @@
    MESSSTELLEN MANAGER PRO - v5.4 (STABLE)
    Full Audit Features + High-End Mapping
    =================================== */
+console.log("🚀 Messstellen Manager Pro v5.4.200 (Updated) Loaded!");
 
 const DEPTHS = ['0.8', '1.6', '3.2'];
 
@@ -59,8 +60,64 @@ const AppState = {
     drawItems: null,
     hiddenMapColors: new Set([]),
     watchId: null,
-    firstLocationFound: false // Critical for initial zoom
+    firstLocationFound: false, // Critical for initial zoom
+    undoStack: [],
+    redoStack: [],
+    chartType: 'balken',
+    showStd: false
 };
+
+function pushState() {
+    AppState.undoStack.push(JSON.stringify(AppState.data));
+    if (AppState.undoStack.length > 50) AppState.undoStack.shift();
+    AppState.redoStack = []; // Clear redo on new action
+}
+
+function undo() {
+    if (AppState.undoStack.length === 0) {
+        showToast("ℹ️ Kein weiterer Verlauf verfügbar");
+        return;
+    }
+    AppState.redoStack.push(JSON.stringify(AppState.data));
+    AppState.data = JSON.parse(AppState.undoStack.pop());
+    
+    // Auto-switch to table tab so user sees the change
+    switchTab('table'); 
+    renderTable();
+    saveToStorage();
+    showToast("⟲ Rückgängig gemacht");
+}
+
+function redo() {
+    if (AppState.redoStack.length === 0) {
+        showToast("ℹ️ Keine weiteren Schritte zum Wiederholen");
+        return;
+    }
+    AppState.undoStack.push(JSON.stringify(AppState.data));
+    AppState.data = JSON.parse(AppState.redoStack.pop());
+    
+    // Auto-switch to table tab so user sees the change
+    switchTab('table');
+    renderTable();
+    saveToStorage();
+    showToast("⟳ Wiederholt");
+}
+
+function switchTab(tabId) {
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('#btnTabTable, #btnTabPlot').forEach(b => b.classList.remove('active'));
+
+    if (tabId === 'table') {
+        document.getElementById('tabTable').classList.add('active');
+        document.getElementById('btnTabTable').classList.add('active');
+        renderTable();
+    } else if (tabId === 'plot') {
+        document.getElementById('tabPlot').classList.add('active');
+        document.getElementById('btnTabPlot').classList.add('active');
+        // Delay ensures canvas has correct width from DOM before drawing
+        setTimeout(renderAppPlot, 100); 
+    }
+}
 
 // GLOBAL ZOOM HANDLER (Full Layout Scale)
 window.handleZoom = function(delta) {
@@ -83,7 +140,7 @@ const STORAGE_KEY = 'messstellen_v54_stable_peak';
 
 let map, layers = {}, captureMode = false;
 let snipTexts = [], draggingTextIdx = -1;
-// currentSnipWidth dihapus agar tidak bentrok
+// currentSnipWidth entfernt zur Vermeidung von Konflikten
 
 const safeOn = (id, evt, cb) => document.getElementById(id)?.addEventListener(evt, cb);
 
@@ -167,6 +224,7 @@ function initUI() {
     safeOn('btnDeleteRow', 'click', (e) => { 
         if(e) e.preventDefault();
         if(AppState.selectedCell) { 
+            pushState();
             AppState.data.splice(parseInt(AppState.selectedCell.split('-')[0]), 1); 
             renderTable(); 
             saveToStorage();
@@ -176,6 +234,7 @@ function initUI() {
 
     safeOn('btnAddRow', 'click', (e) => {
         if(e) e.preventDefault();
+        pushState();
         if (AppState.selectedCell) {
             const rowIndex = parseInt(AppState.selectedCell.split('-')[0]);
             AppState.data.splice(rowIndex + 1, 0, { _isNew: true }); 
@@ -218,6 +277,7 @@ function initUI() {
         }
 
         if (!targetGroup.columns.includes(colName)) {
+            pushState();
             targetGroup.columns.splice(insertIdx, 0, colName);
             AppState.newCols.add(colName);
             AppState.data.forEach(row => { if(row[colName] === undefined) row[colName] = ""; });
@@ -247,7 +307,12 @@ function initUI() {
             }
         }
         if (foundGroup) {
+            if (foundGroup.class !== 'zusatz') {
+                alert("Standard-Spalten (Basis, 0.8, Potential, etc.) dürfen nicht gelöscht werden!");
+                return;
+            }
             if (!confirm(`Möchten Sie '${colToDelete}' wirklich löschen?`)) return;
+            pushState();
             const idx = foundGroup.columns.indexOf(colToDelete);
             foundGroup.columns.splice(idx, 1);
             AppState.newCols.delete(colToDelete);
@@ -258,16 +323,42 @@ function initUI() {
     });
 
 
+    safeOn('btnTabTable', 'click', () => switchTab('table'));
+    safeOn('btnTabPlot', 'click', () => { 
+        switchTab('plot');
+        updateChartUI();
+    });
+
+    safeOn('btnChartBalken', 'click', () => { 
+        AppState.chartType = 'balken'; 
+        updateChartUI(); 
+        renderAppPlot(); 
+    });
+    safeOn('btnChartScatter', 'click', () => { 
+        AppState.chartType = 'scatter'; 
+        updateChartUI(); 
+        renderAppPlot(); 
+    });
+    safeOn('btnStdOn', 'click', () => { 
+        AppState.showStd = true; 
+        updateChartUI(); 
+        renderAppPlot(); 
+    });
+    safeOn('btnStdOff', 'click', () => { 
+        AppState.showStd = false; 
+        updateChartUI(); 
+        renderAppPlot(); 
+    });
+
     safeOn('btnToggleMap', 'click', () => { 
         const m = document.getElementById('mapLayout');
         if(m) {
             m.style.display = 'flex';
             m.classList.add('show'); 
             
-            // Inisialisasi Peta HANYA saat pertama kali diklik
+            // Karten-Redraw erzwingen (Force Redraw)
             if (!map) {
                 initMap();
-                showToast("Initialisierung Karte...");
             }
 
             setTimeout(() => {
@@ -278,9 +369,9 @@ function initUI() {
                     refreshMapVisibility(); // ✔ Sync visibility on load
                     
                     // AUTO-START GPS WATCHING
-                    startLiveTracking(); 
+                    // Automatic GPS start removed to prevent permission prompt
                     
-                    showToast("Karte & Audit geladen ✓ (GPS Aktiv)");
+                    showToast("Karte & Audit geladen ✓");
                 }
             }, 300);
         }
@@ -307,9 +398,14 @@ function initUI() {
     safeOn('btnToolbarToggle32', 'click', () => toggleLayerColor('#00ffff', 'btnToggle32'));
     
     safeOn('btnRefreshTable', 'click', () => {
-        renderTable();
-        showToast("✓ Tabelle aktualisiert");
+        const pId = localStorage.getItem('current_project_id');
+        if (pId) loadProject(pId);
+        else renderTable();
+        showToast("✓ Tabelle neu geladen");
     });
+
+    safeOn('btnUndo', 'click', undo);
+    safeOn('btnRedo', 'click', redo);
 
     safeOn('btnUploadPlan', 'click', () => document.getElementById('inputPlanImage').click());
     safeOn('inputPlanImage', 'change', (e) => {
@@ -397,7 +493,6 @@ function initUI() {
         if(!map) return;
         AppState.liveFollow = true; 
         AppState.firstLocationFound = false; // Reset to trigger zoom-in effect
-        showToast("🛰️ Fokus ke lokasi Anda (Zoom-In)...");
         startLiveTracking();
     });
 
@@ -526,24 +621,11 @@ function initUI() {
         showToast("✓ Anhang heruntergeladen!");
     });
 
-    safeOn('btnColManager', 'click', () => {
-        const modal = document.getElementById('colManagerModal'), grid = document.getElementById('colManagerGrid');
-        grid.innerHTML = '';
-        TABLE_STRUCTURE.forEach(g => {
-            const div = document.createElement('div');
-            div.style.padding = '10px'; div.style.display = 'flex'; div.style.justifyContent = 'space-between';
-            const isVisible = !AppState.hiddenColumns.has(g.class);
-            div.innerHTML = `<span>${g.group}</span><input type="checkbox" ${isVisible ? 'checked' : ''}>`;
-            div.querySelector('input').onchange = (e) => {
-                if(e.target.checked) AppState.hiddenColumns.delete(g.class);
-                else AppState.hiddenColumns.add(g.class);
-                renderTable();
-            };
-            grid.appendChild(div);
-        });
-        modal.style.display = 'block';
-    });
+    safeOn('btnUndo', 'click', undo);
+    safeOn('btnRedo', 'click', redo);
+    safeOn('btnColManager', 'click', openColManager);
     safeOn('btnCloseColManager', 'click', () => document.getElementById('colManagerModal').style.display = 'none');
+    safeOn('btnRefreshTable', 'click', () => { renderTable(); showToast("✓ Tabelle aktualisiert"); });
 
 
 
@@ -584,22 +666,31 @@ function initUI() {
     });
 }
 
-function setStartPoint() {
-    if (!map) { showToast("⚠️ Bitte zuerst Karte öffnen!"); return; }
-    
-    const latlng = AppState.userMarker ? AppState.userMarker.getLatLng() : map.getCenter();
-    AppState.startPoint = latlng;
-    
-    if (AppState.startMarker) map.removeLayer(AppState.startMarker);
-    
-    const startIcon = L.divIcon({
-        html: '<div style="background:#ef4444;width:20px;height:20px;border-radius:50%;border:3px solid white;box-shadow:0 0 10px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;"><i class="fas fa-flag" style="color:white;font-size:10px;"></i></div>',
-        iconSize: [20, 20], iconAnchor: [10, 10], className: 'start-marker'
-    });
-    
-    AppState.startMarker = L.marker(latlng, { icon: startIcon, zIndexOffset: 3000 }).addTo(map);
-    showToast(`📍 Startpunkt gesetzt: ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`);
+function switchTab(tab) {
+    const btnTable = document.getElementById('btnTabTable');
+    const btnPlot = document.getElementById('btnTabPlot');
+    const tabTable = document.getElementById('tabTable');
+    const tabPlot = document.getElementById('tabPlot');
+
+    if (tab === 'table') {
+        btnTable.classList.add('active');
+        btnPlot.classList.remove('active');
+        tabTable.classList.add('active');
+        tabPlot.classList.remove('active');
+        tabTable.style.display = 'block';
+        tabPlot.style.display = 'none';
+    } else {
+        btnTable.classList.remove('active');
+        btnPlot.classList.add('active');
+        tabTable.classList.remove('active');
+        tabPlot.classList.add('active');
+        tabTable.style.display = 'none';
+        tabPlot.style.display = 'block';
+        setTimeout(renderAppPlot, 50); // Small delay to ensure container is visible for canvas scaling
+    }
 }
+
+// Old setStartPoint removed to avoid conflict
 
 function stopDrawing(silent = false) {
     if (AppState.activeDrawTool && AppState.activeDrawTool.disable) {
@@ -839,7 +930,7 @@ function initMap() {
             setupInteractiveLayer(layer);
         }
 
-        // PAKSA REPEAT MODE AGAR TIDAK MATI
+        // REPEAT MODE ERZWINGEN
         if (AppState.activeDrawTool) {
             setTimeout(() => {
                 if (AppState.activeDrawTool) AppState.activeDrawTool.enable();
@@ -897,7 +988,7 @@ function setupInteractiveLayer(layer) {
 function switchLayer(key) {
     if (!map) return;
     
-    // Hapus semua lapisan lama
+    // Alle alten Ebenen entfernen
     if (layers.standard) map.removeLayer(layers.standard);
     if (layers.satellite) map.removeLayer(layers.satellite);
     if (layers.offlinePlan) map.removeLayer(layers.offlinePlan);
@@ -912,7 +1003,7 @@ function switchLayer(key) {
         showToast("✓ STANDARD KARTE");
     }
 
-    // Paksa Peta menggambar ulang (Force Redraw)
+    // Karten-Redraw erzwingen (Force Redraw)
     setTimeout(() => {
         map.invalidateSize();
         const currentZoom = map.getZoom();
@@ -963,7 +1054,6 @@ window.toggleLayerColor = function(color, triggerBtnId) {
     
     if (isHidden) {
         AppState.hiddenMapColors.delete(colorLower);
-        AppState.hiddenColumns.delete(depthKey);
         btnIds.forEach(id => {
             const btn = document.getElementById(id);
             if (btn) {
@@ -972,10 +1062,8 @@ window.toggleLayerColor = function(color, triggerBtnId) {
                 if (icon) icon.className = 'fas fa-eye';
             }
         });
-        showToast(`👁️ ${colorLabel(color)} eingeblendet`);
     } else {
         AppState.hiddenMapColors.add(colorLower);
-        AppState.hiddenColumns.add(depthKey);
         btnIds.forEach(id => {
             const btn = document.getElementById(id);
             if (btn) {
@@ -984,7 +1072,6 @@ window.toggleLayerColor = function(color, triggerBtnId) {
                 if (icon) icon.className = 'fas fa-eye-slash';
             }
         });
-        showToast(`🙈 ${colorLabel(color)} ausgeblendet`);
     }
 
     renderTable();
@@ -1047,7 +1134,11 @@ function toggleLiveFollow() {
             watch: true, 
             enableHighAccuracy: true,
             maximumAge: 1000,
-            timeout: 10000
+            timeout: 10000,
+            onLocationError: (e) => {
+                const status = document.getElementById('gpsStatusText');
+                if (status) status.innerText = "GPS Fehler: " + e.message;
+            }
         }); 
         showToast('📍 Live-Verfolgung: AN'); 
     }
@@ -1058,27 +1149,29 @@ function toggleLiveFollow() {
 }
 
 function setStartPoint() {
-    if (!AppState.userMarker && !AppState.map) return;
+    if (!map) return;
     
-    const latlng = AppState.userMarker ? AppState.userMarker.getLatLng() : AppState.map.getCenter();
+    // Use userMarker position if available, otherwise map center
+    const latlng = AppState.userMarker ? AppState.userMarker.getLatLng() : map.getCenter();
     AppState.startPoint = latlng;
     
-    if (AppState.startMarker) AppState.map.removeLayer(AppState.startMarker);
+    if (AppState.startMarker) map.removeLayer(AppState.startMarker);
     AppState.startMarker = L.marker(latlng, {
         icon: L.divIcon({ 
             className: 'start-point-wrapper',
             html: `
                 <div style="display:flex; align-items:center; gap:8px; white-space:nowrap;">
                     <div style="display:flex; align-items:center; justify-content:center; width:32px; height:32px; background:#000; border:2px solid #fff; border-radius:50%; box-shadow:0 0 15px rgba(0,0,0,0.8);">
-                        <i class="fas fa-times" style="color: #fff; font-size: 18px; font-weight:900;"></i>
+                        <i class="fas fa-flag" style="color: #fff; font-size: 18px; font-weight:900;"></i>
                     </div>
                     <span style="background:#000; color:#fff; border:1px solid #fff; padding:4px 10px; border-radius:6px; font-weight:900; font-size:12px; letter-spacing:1px; box-shadow:0 4px 15px rgba(0,0,0,0.5);">STARTPUNKT</span>
                 </div>
             `, 
             iconSize: [150, 32], 
-            iconAnchor: [16, 16] 
-        })
-    }).addTo(AppState.map);
+            iconAnchor: [16, 16]
+        }),
+        zIndexOffset: 3000
+    }).addTo(map);
 
     // Show distance immediately
     const distanceBadge = document.getElementById('distanceBadge');
@@ -1120,14 +1213,33 @@ async function triggerAusschnitt(targetLayer) {
         <option value="Anhang_0.8">0.8m</option>
         <option value="Anhang_1.6">1.6m</option>
         <option value="Anhang_3.2">3.2m</option>
-        <option value="Anhang_Global">Gesamt (Project)</option>
+        <option value="Anhang_Global">Anhang (Gesamt)</option>
     `;
-    typeSel.value = 'Anhang_0.8'; 
-    document.getElementById('snipColorIndicator').style.background = '#ff00ff';
+    // AUTO-DETECT CATEGORY BASED ON VISIBILITY
+    const visibleColors = [];
+    if (!AppState.hiddenMapColors.has('#ff00ff')) visibleColors.push('0.8');
+    if (!AppState.hiddenMapColors.has('#ffff00')) visibleColors.push('1.6');
+    if (!AppState.hiddenMapColors.has('#00ffff')) visibleColors.push('3.2');
+
+    if (visibleColors.length > 1) {
+        typeSel.value = 'Anhang_Global';
+        document.getElementById('snipColorIndicator').style.background = '#ffffff';
+    } else if (visibleColors.length === 1) {
+        typeSel.value = `Anhang_${visibleColors[0]}`;
+        const c = visibleColors[0] === '0.8' ? '#ff00ff' : (visibleColors[0] === '1.6' ? '#ffff00' : '#00ffff');
+        document.getElementById('snipColorIndicator').style.background = c;
+    } else {
+        typeSel.value = 'Anhang_Global';
+        document.getElementById('snipColorIndicator').style.background = '#ffffff';
+    }
+
+    const lastActiveRow = AppState.selectedCell ? AppState.selectedCell.split('-')[0] : "";
 
     AppState.data.forEach((r, i) => {
         const opt = document.createElement('option'); opt.value = i;
         opt.textContent = `ZEILE ${i+1}: ${r.Kennzeichen || '---'}`;
+        if (lastActiveRow !== "" && parseInt(lastActiveRow) === i) opt.selected = true;
+        else if (lastActiveRow === "" && i === 0) opt.selected = true; // Default to first row
         rowSel.appendChild(opt);
     });
 
@@ -1259,30 +1371,21 @@ function saveFinalSnip() {
     const targetIdxRaw = document.getElementById('snipTargetRow').value;
     let targetCol = document.getElementById('snipTargetType').value;
     
-    if(targetIdxRaw === "" || !targetCol) { 
-        showToast("⚠️ Bitte Zeile & Typ memilih!"); 
-        return; 
-    }
-    
-    const targetIdx = parseInt(targetIdxRaw);
-    
-    // FINAL VALIDATION
-    if (targetCol === 'Anhang_Global') {
-        console.log("Saving to Global Attachment for Row", targetIdx);
-    }
+    const targetIdx = parseInt(targetIdxRaw) || 0;
+    if (!targetCol) targetCol = 'Anhang_Global';
 
-    if (!AppState.data[targetIdx]) {
-        showToast("❌ Fehler: Zeile existiert nicht!");
-        return;
+    try {
+        if (AppState.data && AppState.data[targetIdx]) {
+            AppState.data[targetIdx][targetCol] = canvas.toDataURL();
+            renderTable(); 
+            saveToStorage();
+        }
+    } catch (e) {
+        console.error("Speichern fehlgeschlagen:", e);
+    } finally {
+        const modal = document.getElementById('snipConfirmModal');
+        if (modal) modal.style.display = 'none';
     }
-
-    AppState.data[targetIdx][targetCol] = canvas.toDataURL();
-    renderTable(); 
-    saveToStorage();
-    
-    document.getElementById('snipConfirmModal').style.display = 'none';
-    const friendlyName = targetCol === 'Anhang_Global' ? 'Anhang (Gesamt)' : targetCol.replace('Anhang_', '') + 'm';
-    showToast(`✓ Foto disimpan di: ZEILE ${targetIdx + 1} - ${friendlyName}`);
 }
 
 function toggleMapUI(isOffline) {
@@ -1367,32 +1470,57 @@ function handleFileUpload(file) {
 function updateLiveCalculations(row, col, tr) {
     if (!(col.startsWith('R') && col.includes('_'))) return;
     const dStr = col.split('_')[1], d = parseFloat(dStr), n = col.substring(1, 2);
-    const rVal = parseFloat((row[col] || "0").replace(',', '.'));
-    if (!isNaN(rVal) && !isNaN(d)) {
-        const rhoKey = `ρ${n} [Ωm]_${dStr}`;
-        row[rhoKey] = (2 * Math.PI * d * rVal).toFixed(2);
-        let sum = 0, count = 0;
-        for(let k=1; k<=3; k++) {
-            const rk = parseFloat((row[`R${k} [Ω]_${dStr}`] || "0").replace(',', '.'));
-            if(!isNaN(rk) && rk > 0) { sum += rk; count++; }
+    const rawVal = (row[col] || "").toString().trim().replace(',', '.');
+    const rhoKey = `ρ${n} [Ωm]_${dStr}`;
+    const mwKey = `MW [Ωm]_${dStr}`;
+    const sdKey = `SD [Ωm]_${dStr}`;
+
+    // 1. Update Rho for current input
+    if (rawVal === "") {
+        row[rhoKey] = "";
+    } else {
+        const rVal = parseFloat(rawVal);
+        if (!isNaN(rVal) && !isNaN(d)) {
+            row[rhoKey] = (2 * Math.PI * d * rVal).toFixed(2);
         }
-        if(count > 0) {
-            const mwR = sum / count, mwKey = `MW [Ωm]_${dStr}`, sdKey = `SD [Ωm]_${dStr}`;
-            row[mwKey] = (2 * Math.PI * d * mwR).toFixed(2);
-            if(count > 1) {
-                let sqSum = 0;
-                for(let k=1; k<=3; k++) {
-                    const rk = parseFloat((row[`R${k} [Ω]_${dStr}`] || "0").replace(',', '.'));
-                    if(!isNaN(rk) && rk > 0) sqSum += Math.pow(rk - mwR, 2);
-                }
-                row[sdKey] = (2 * Math.PI * d * Math.sqrt(sqSum / (count - 1))).toFixed(2);
-            } else row[sdKey] = '0.00';
-        }
-        tr.querySelectorAll('input').forEach(tInp => {
-            const tc = tInp.dataset.col || '';
-            if (row[tc] !== undefined && tc !== col) tInp.value = row[tc];
-        });
     }
+
+    // 2. Calculate MW and SD for the group
+    let sum = 0, count = 0, values = [];
+    for(let k=1; k<=3; k++) {
+        const rkRaw = (row[`R${k} [Ω]_${dStr}`] || "").toString().trim().replace(',', '.');
+        if (rkRaw !== "") {
+            const rk = parseFloat(rkRaw);
+            if(!isNaN(rk)) { 
+                sum += rk; 
+                count++; 
+                values.push(rk);
+            }
+        }
+    }
+
+    if(count > 0) {
+        const mwR = sum / count;
+        row[mwKey] = (2 * Math.PI * d * mwR).toFixed(2);
+        if(count > 1) {
+            let sqSum = 0;
+            values.forEach(v => sqSum += Math.pow(v - mwR, 2));
+            row[sdKey] = (2 * Math.PI * d * Math.sqrt(sqSum / (count - 1))).toFixed(2);
+        } else {
+            row[sdKey] = ""; // Standard deviation requires at least 2 points
+        }
+    } else {
+        row[mwKey] = "";
+        row[sdKey] = "";
+    }
+
+    // 3. Update DOM for all affected inputs in this row
+    tr.querySelectorAll('input').forEach(tInp => {
+        const tc = tInp.dataset.col || '';
+        if (tc !== col && (tc.startsWith('ρ') || tc.startsWith('MW') || tc.startsWith('SD'))) {
+            tInp.value = row[tc] || "";
+        }
+    });
 }
 
 function renderTable(onlyBody = false) {
@@ -1562,6 +1690,11 @@ function renderTable(onlyBody = false) {
                         inp.style.fontWeight = '700';
                     }
                     inp.onfocus = () => AppState.selectedCell = `${idx}-${col}`;
+                    inp.onchange = (e) => {
+                        pushState();
+                        originalRow[col] = e.target.value;
+                        saveToStorage();
+                    };
                     inp.oninput = (e) => {
                         originalRow[col] = e.target.value;
                         updateLiveCalculations(originalRow, col, tr);
@@ -1575,8 +1708,12 @@ function renderTable(onlyBody = false) {
         tbody.appendChild(tr);
     });
 
-    // TRIGGER PLOT UPDATE
-    renderAppPlot();
+    // TRIGGER PLOT UPDATE (SAFE)
+    try { 
+        if (typeof renderAppPlot === 'function') renderAppPlot(); 
+    } catch(e) { 
+        console.warn("Plotting error:", e); 
+    }
 }
 
 function openImagePreview(url, t) {
@@ -1626,32 +1763,47 @@ function saveMapData() {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-function saveToStorage() { 
-    const pName = document.getElementById('projectName').value || 'Unbenanntes Projekt';
-    
-    // ENSURE ALL OBJECTS (MARKERS & LINES) HAVE COLOR IN GEOJSON
-    if (layers.drawItems) {
-        layers.drawItems.eachLayer(l => {
-            if (l.options && l.options.markerColor) {
-                if(!l.feature) l.feature = { type: 'Feature', properties: {} };
-                l.feature.properties.markerColor = l.options.markerColor;
-            }
-        });
-    }
+function showToast(m, duration = 4000) { 
+    const t = document.getElementById('toast');
+    const msg = document.getElementById('toastMessage');
+    if(!t || !msg) return;
+    msg.innerText = m;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), duration);
+}
 
-    const project = {
-        name: pName,
-        data: AppState.data,
-        mapData: layers.drawItems ? layers.drawItems.toGeoJSON() : null,
-        timestamp: Date.now(),
-        hiddenMapColors: Array.from(AppState.hiddenMapColors),
-        newCols: Array.from(AppState.newCols)
-    };
-    
-    let library = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
-    library[pName] = project;
-    localStorage.setItem('messstellen_library', JSON.stringify(library));
-    localStorage.setItem('current_project_id', pName);
+function saveToStorage() { 
+    try {
+        const pName = document.getElementById('projectName').value || 'Unbenanntes Projekt';
+        
+        if (layers.drawItems) {
+            layers.drawItems.eachLayer(l => {
+                if (l.options && l.options.markerColor) {
+                    if(!l.feature) l.feature = { type: 'Feature', properties: {} };
+                    l.feature.properties.markerColor = l.options.markerColor;
+                }
+            });
+        }
+
+        const project = {
+            name: pName,
+            data: AppState.data,
+            mapData: layers.drawItems ? layers.drawItems.toGeoJSON() : null,
+            timestamp: Date.now(),
+            hiddenMapColors: Array.from(AppState.hiddenMapColors || []),
+            newCols: Array.from(AppState.newCols || [])
+        };
+        
+        let library = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
+        library[pName] = project;
+        localStorage.setItem('messstellen_library', JSON.stringify(library));
+        localStorage.setItem('current_project_id', pName);
+        return true;
+    } catch (e) {
+        console.error("Save error:", e);
+        showToast("❌ Fehler beim Speichern!");
+        return false;
+    }
 }
 
 function loadFromStorage() { 
@@ -1727,7 +1879,6 @@ function restoreMapDrawings() {
                         const num   = feature.properties.markerNumber;
 
                         if (isNum) {
-                            // Restore Numbered Circle
                             return L.marker(latlng, {
                                 draggable: true,
                                 markerColor: color,
@@ -1739,7 +1890,6 @@ function restoreMapDrawings() {
                                 })
                             });
                         } else {
-                            // Restore SVG Pin Pin Icon
                             const pinSvg = `<svg width="32" height="42" viewBox="0 0 32 42" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 0C7.16344 0 0 7.16344 0 16C0 28 16 42 16 42C16 42 32 28 32 16C32 7.16344 24.8366 0 16 0Z" fill="${color}"/><circle cx="16" cy="16" r="6" fill="white"/></svg>`;
                             return L.marker(latlng, {
                                 draggable: true,
@@ -1764,7 +1914,6 @@ function restoreMapDrawings() {
                         layers.drawItems.addLayer(layer);
                     }
                 }).addTo(map);
-                showToast(`📌 ${layers.drawItems.getLayers().length} Objekte wiederhergestellt`);
             } catch (e) { console.error("Error restoring map", e); }
         }
     }
@@ -1773,12 +1922,11 @@ function restoreMapDrawings() {
 function renderProjectList() {
     const grid = document.getElementById('standortGrid');
     const library = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
-    
+    if (!grid) return;
     if (Object.keys(library).length === 0) {
         grid.innerHTML = '<p style="color:#888; text-align:center; padding:20px;">Keine Projekte vorhanden</p>';
         return;
     }
-
     grid.innerHTML = '';
     Object.values(library).sort((a,b) => b.timestamp - a.timestamp).forEach(p => {
         const item = document.createElement('div');
@@ -1791,7 +1939,6 @@ function renderProjectList() {
             </div>
             <button class="btn-modern btn-danger btn-delete-project" style="padding:8px;"><i class="fas fa-trash"></i></button>
         `;
-        
         item.onclick = (e) => {
             if (e.target.closest('.btn-delete-project')) {
                 if(confirm(`Projekt "${p.name}" wirklich löschen?`)) {
@@ -1817,34 +1964,12 @@ function loadProject(name) {
         document.getElementById('projectName').value = p.name;
         renderTable();
         if (map) restoreMapDrawings();
-        showToast(`📂 Projekt geladen: ${p.name}`);
     }
 }
+
 function createEmptyRows(n) { for(let i=0; i<n; i++) AppState.data.push({}); }
-
-function showToast(m, duration = 4000) { 
-    const existing = document.querySelectorAll('.modern-toast');
-    existing.forEach(t => { t.style.opacity = '0'; t.style.transform = 'translateX(-50%) translateY(-20px)'; });
-
-    const t = document.createElement('div');
-    t.className = 'modern-toast';
-    t.innerHTML = `<i class="fas fa-info-circle"></i> <span>${m}</span>`;
-    document.body.appendChild(t);
-    
-    setTimeout(() => t.classList.add('show'), 10);
-    
-    setTimeout(() => { 
-        t.classList.remove('show');
-        setTimeout(() => { if(t.parentNode) document.body.removeChild(t); }, 500);
-    }, duration);
-}
-
-// Opens the export depth-selector modal
 function openExportModal() {
-    if (AppState.data.length === 0) {
-        showToast("⚠️ Keine Daten zum Exportieren!", 3000);
-        return;
-    }
+    if (AppState.data.length === 0) return;
     // Pre-tick checkboxes based on current visible depths
     const chk08 = document.getElementById('exportChk08');
     const chk16 = document.getElementById('exportChk16');
@@ -1910,7 +2035,7 @@ async function exportExcel(opts = null) {
             // Fallback: use hidden columns logic
             ['08','16','32'].forEach(d => { if (!AppState.hiddenColumns.has(d)) depthsToExport.push(d); });
         }
-        const depthLabels = { '08': '0.80 m', '16': '1.60 m', '32': '3.20 m' };
+        const depthLabels = { '08': '0.8 m', '16': '1.6 m', '32': '3.2 m' };
         
         depthsToExport.forEach(d => {
             h1.push(depthLabels[d], "", "", "", "", "", "", "", "");
@@ -2053,171 +2178,195 @@ async function exportExcel(opts = null) {
 
         worksheet.columns = colWidths;
 
-        // --- STATISTIK-WEDAL SHEET ---
+        // --- STATISTIK-WEDAL SHEET (CLEAN REPORT LOOK) ---
         const statSheet = workbook.addWorksheet('Statistik-WEDAL');
         
-        // Headers for Statistics
-        const sRow3 = statSheet.getRow(3);
-        const sRow4 = statSheet.getRow(4);
-        const sRow5 = statSheet.getRow(5);
-        
-        const sH1 = ["Kennzeichen"];
-        const sH2 = [""];
-        const sH3 = [""];
-        
-        depthsToExport.forEach(d => {
-            const label = depthLabels[d];
-            sH1.push(label, "", "");
-            sH2.push("Einzelne Werte", "Mittelwert", "Standard Abweichung");
-            sH3.push("rho [Ωm]", "", "");
-        });
-        
-        sRow3.values = sH1;
-        sRow4.values = sH2;
-        sRow5.values = sH3;
+        // Header title for the sheet
+        statSheet.mergeCells('A1:L1');
+        const titleCell = statSheet.getCell('A1');
+        titleCell.value = 'BODENWIDERSTAND - STATISTIK - WEDAL';
+        titleCell.font = { name: 'Inter', bold: true, size: 24, color: { argb: 'FF0F172A' } };
+        titleCell.alignment = { horizontal: 'center' };
 
-        // Header Styling
-        [sRow3, sRow4, sRow5].forEach(row => {
-            row.eachCell((cell) => {
-                cell.font = headerFont;
-                cell.alignment = centerAlignment;
-                cell.border = borderStyle;
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE9ECEF' } };
+        // --- CHART GENERATION (Numerical Scientific Charts) ---
+        const renderExportChart = (type, showSD) => {
+            const validData = AppState.data.filter(r => {
+                const kmVal = (r['Kennzeichen'] || "").toString().trim();
+                if (kmVal === "" || isNaN(parseFloat(kmVal.replace(',', '.')))) return false;
+                return Object.keys(r).some(k => (k.includes('MW') || k.includes('R1') || k.includes('ρ')) && r[k] !== "" && r[k] !== null);
             });
-        });
 
-        // Statistics Merges
-        statSheet.mergeCells('A3:A5');
-        let sMergeCol = 2;
-        depthsToExport.forEach(() => {
-            statSheet.mergeCells(3, sMergeCol, 3, sMergeCol + 2); // Depth Label
-            statSheet.mergeCells(4, sMergeCol + 1, 5, sMergeCol + 1); // MW
-            statSheet.mergeCells(4, sMergeCol + 2, 5, sMergeCol + 2); // SD
-            sMergeCol += 3;
-        });
+            if (validData.length === 0) return null;
 
-        // Add Statistics Data
-        let currentStatRow = 6;
-        for (let i = 0; i < AppState.data.length; i++) {
-            const dataRow = AppState.data[i];
+            const dataWithKm = validData.map((r, idx) => {
+                let kmStr = r['Kennzeichen'].toString().replace(',', '.');
+                let km = parseFloat(kmStr);
+                return { ...r, _km: km, _idx: idx };
+            }).sort((a, b) => a._km - b._km);
+
+            const minKm = dataWithKm[0]._km;
+            const maxKm = dataWithKm[dataWithKm.length - 1]._km;
+            const kmRange = Math.max(0.001, maxKm - minKm);
+
+            const dynamicWidth = 2400; 
+            const canv = document.createElement('canvas');
+            canv.width = dynamicWidth; canv.height = 1400; // Significantly taller
+            const c = canv.getContext('2d');
+            const cp = { top: 120, bottom: 120, left: 140, right: 100 };
+            const cw = canv.width - cp.left - cp.right;
+            const ch = canv.height - cp.top - cp.bottom;
+
+            c.fillStyle = '#ffffff'; c.fillRect(0, 0, canv.width, canv.height);
+            const dCols = { '08': '#ff00ff', '16': '#eab308', '32': '#06b6d4' };
             
-            // Create 3 rows for rho1, rho2, rho3
-            for (let r = 1; r <= 3; r++) {
-                const excelRow = statSheet.getRow(currentStatRow + r - 1);
-                const values = [];
-                
-                if (r === 1) values.push(dataRow['Kennzeichen'] || "");
-                else values.push("");
-                
-                depthsToExport.forEach(d => {
-                    const sfx = d === '08' ? '0.8' : (d === '16' ? '1.6' : '3.2');
-                    
-                    const findV = (prefix) => {
-                        return dataRow[`${prefix} [Ω]_${sfx}`] || 
-                               dataRow[`${prefix} [Ωm]_${sfx}`] || 
-                               dataRow[`${prefix}_${sfx}`] || "";
-                    };
+            // LEGEND DRAWING
+            const lx = cp.left + 50;
+            const ly = 95; // Just below title
+            c.font = 'bold 22px Inter, sans-serif'; c.textAlign = 'left';
+            depthsToExport.forEach((d, i) => {
+                const label = depthLabels[d];
+                const curX = lx + (i * 350);
+                c.fillStyle = dCols[d];
+                if (type === 'scatter') {
+                    const sz = 12;
+                    if (d === '08') { c.beginPath(); c.arc(curX, ly - 8, sz, 0, Math.PI*2); c.fill(); }
+                    else if (d === '16') { c.fillRect(curX - sz, ly - 8 - sz, sz*2, sz*2); }
+                    else { c.beginPath(); c.moveTo(curX, ly - 8 - sz*1.4); c.lineTo(curX + sz*1.4, ly - 8); c.lineTo(curX, ly - 8 + sz*1.4); c.lineTo(curX - sz*1.4, ly - 8); c.closePath(); c.fill(); }
+                } else {
+                    c.fillRect(curX - 15, ly - 23, 30, 30);
+                }
+                c.fillStyle = '#334155';
+                c.fillText(label, curX + 35, ly);
+            });
 
-                    values.push(findV(`ρ${r}`));
-                    
-                    if (r === 1) {
-                        values.push(findV('MW'));
-                        values.push(findV('SD'));
-                    } else {
-                        values.push("");
-                        values.push("");
-                    }
-                });
-                excelRow.values = values;
+            const isLinear = type === 'scatter';
+            const px = 50; // Horizontal inner padding to prevent clipping of markers at edges
+            
+            if (isLinear) {
+                // X-Axis Ticks (Linear KM Axis - Aligned with Comparative intervals)
+                const tickStep = kmRange > 30 ? 10 : (kmRange > 15 ? 5 : (kmRange > 5 ? 2 : 1));
+                c.strokeStyle = '#cbd5e1'; c.lineWidth = 1;
+                c.textAlign = 'center'; c.font = 'bold 18px Inter, sans-serif'; c.fillStyle = '#475569';
                 
-                excelRow.eachCell((cell, colNum) => {
-                    cell.font = dataFont;
-                    cell.alignment = centerAlignment;
-                    cell.border = borderStyle;
+                let lastLabelX = -150;
+                for (let val = Math.ceil(minKm / tickStep) * tickStep; val <= maxKm; val += tickStep) {
+                    const x = cp.left + px + ((cw - 2*px) * (val - minKm) / kmRange);
+                    c.beginPath(); c.moveTo(x, cp.top); c.lineTo(x, cp.top + ch); c.stroke();
+                    // Avoid overlapping labels & format numbers cleanly
+                    if (x - lastLabelX > 110) {
+                        const labelText = Number(val.toFixed(2)).toString() + " km";
+                        c.fillText(labelText, x, cp.top + ch + 50);
+                        lastLabelX = x;
+                    }
+                }
+            } else {
+                // X-Axis Ticks (Discrete Category)
+                const colWidth = (cw - 2*px) / dataWithKm.length;
+                c.strokeStyle = '#cbd5e1'; c.lineWidth = 1;
+                c.textAlign = 'center'; c.font = 'bold 16px Inter, sans-serif'; c.fillStyle = '#475569';
+                dataWithKm.forEach((row, i) => {
+                    const x = cp.left + px + (i * colWidth) + (colWidth / 2);
+                    c.beginPath(); c.moveTo(x, cp.top); c.lineTo(x, cp.top + ch); c.stroke();
+                    if (dataWithKm.length < 25 || i % Math.ceil(dataWithKm.length/20) === 0) {
+                        c.fillText(row['Kennzeichen'], x, cp.top + ch + 50);
+                    }
                 });
             }
 
-            // Merge Kennzeichen, MW, and SD cells over the 3 rows
-            statSheet.mergeCells(currentStatRow, 1, currentStatRow + 2, 1);
-            let mCol = 3;
-            depthsToExport.forEach(() => {
-                statSheet.mergeCells(currentStatRow, mCol, currentStatRow + 2, mCol); // MW
-                statSheet.mergeCells(currentStatRow, mCol + 1, currentStatRow + 2, mCol + 1); // SD
-                mCol += 3;
+            // Grid Y
+            for(let i=0; i<=10; i++) {
+                const y = cp.top + ch - (ch * (i/10));
+                c.strokeStyle = '#f1f5f9';
+                c.beginPath(); c.moveTo(cp.left, y); c.lineTo(cp.left + cw, y); c.stroke();
+            }
+
+            // Axes Box
+            c.strokeStyle = '#0f172a'; c.lineWidth = 4;
+            c.strokeRect(cp.left, cp.top, cw, ch);
+
+            let mv = 10;
+            dataWithKm.forEach(r => {
+                depthsToExport.forEach(d => {
+                    const sfx = d === '08' ? '0.8' : (d === '16' ? '1.6' : '3.2');
+                    const v = parseFloat(r[`MW [Ωm]_${sfx}`]) || 0;
+                    const s = showSD ? (parseFloat(r[`SD [Ωm]_${sfx}`]) || 0) : 0;
+                    mv = Math.max(mv, v + s);
+                });
+            });
+            mv *= 1.15;
+
+            // Y Labels
+            c.textAlign = 'right'; c.font = 'bold 22px Inter, sans-serif'; c.fillStyle = '#1e293b';
+            for(let i=0; i<=10; i++) {
+                const y = cp.top + ch - (ch * (i/10));
+                c.fillText((mv * (i/10)).toFixed(0), cp.left - 30, y + 8);
+            }
+
+            const barGroupW = (cw - 2*px) / dataWithKm.length;
+            dataWithKm.forEach((row, i) => {
+                let x;
+                if (isLinear) x = cp.left + px + ((cw - 2*px) * (row._km - minKm) / kmRange);
+                else x = cp.left + px + (i * barGroupW) + (barGroupW / 2);
+
+                depthsToExport.forEach((d, di) => {
+                    const sfx = d === '08' ? '0.8' : (d === '16' ? '1.6' : '3.2');
+                    const val = parseFloat(row[`MW [Ωm]_${sfx}`]) || 0;
+                    if (val <= 0) return;
+                    
+                    const y = cp.top + ch - (ch * (val / mv));
+                    const xOff = !isLinear ? (di - (depthsToExport.length-1)/2) * (barGroupW * 0.22) : 0;
+                    const bw = !isLinear ? (barGroupW * 0.65) / depthsToExport.length : 18;
+
+                    if (type === 'balken') {
+                        c.fillStyle = dCols[d];
+                        c.fillRect(x + xOff - bw/2, y, bw, (cp.top + ch) - y);
+                        c.strokeStyle = 'rgba(0,0,0,0.4)'; c.lineWidth = 1.5;
+                        c.strokeRect(x + xOff - bw/2, y, bw, (cp.top + ch) - y);
+                    } else {
+                        c.fillStyle = dCols[d]; c.strokeStyle = '#000'; c.lineWidth = 2.5;
+                        const sz = 14;
+                        if (d === '08') { c.beginPath(); c.arc(x, y, sz, 0, Math.PI*2); c.fill(); c.stroke(); }
+                        else if (d === '16') { c.fillRect(x - sz, y - sz, sz*2, sz*2); c.strokeRect(x - sz, y - sz, sz*2, sz*2); }
+                        else { c.beginPath(); c.moveTo(x, y - sz*1.4); c.lineTo(x + sz*1.4, y); c.lineTo(x, y + sz*1.4); c.lineTo(x - sz*1.4, y); c.closePath(); c.fill(); c.stroke(); }
+                    }
+
+                    if (showSD) {
+                        const sd = parseFloat(row[`SD [Ωm]_${sfx}`]) || 0;
+                        if (sd > 0) {
+                            const sdy = ch * (sd / mv);
+                            c.strokeStyle = '#000'; c.lineWidth = 3;
+                            c.beginPath(); c.moveTo(x + xOff, y - sdy); c.lineTo(x + xOff, y + sdy); c.stroke();
+                            c.beginPath(); c.moveTo(x + xOff - 8, y - sdy); c.lineTo(x + xOff + 8, y - sdy); c.stroke();
+                            c.beginPath(); c.moveTo(x + xOff - 8, y + sdy); c.lineTo(x + xOff + 8, y + sdy); c.stroke();
+                        }
+                    }
+                });
             });
 
-            currentStatRow += 3;
-        }
+            c.textAlign = 'center'; c.font = 'bold 38px Inter, sans-serif'; c.fillStyle = '#0f172a';
+            const chartTitle = type === 'balken' ? 'BALKEN - BODENWIDERSTAND - MITTELWERT - WEDAL' : 'PLOT - BODENWIDERSTAND - MITTELWERT - WEDAL';
+            c.fillText(`${chartTitle}${showSD ? ' mit Standard Abweichung' : ''}`, canv.width/2, 50);
+            
+            return { data: canv.toDataURL('image/jpeg', 0.85), w: dynamicWidth };
+        };
 
-        // Set Statistik Column Widths
-        const statWidths = [{ width: 25 }]; // Kennzeichen
-        depthsToExport.forEach(() => {
-            statWidths.push({ width: 15 }, { width: 15 }, { width: 25 }); // rho, MW, SD
-        });
-        statSheet.columns = statWidths;
+        const chartPositions = [
+            { type: 'balken', sd: false, r: 3, c: 1 },
+            { type: 'balken', sd: true, r: 48, c: 1 }, // Spaced out
+            { type: 'scatter', sd: false, r: 93, c: 1 },
+            { type: 'scatter', sd: true, r: 138, c: 1 }
+        ];
 
-        // --- CHART GENERATION ---
-        const canvas = document.createElement('canvas');
-        canvas.width = 1200; canvas.height = 800;
-        const ctx = canvas.getContext('2d');
-        
-        // Background
-        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw Plot (Simple Bar Chart with Error Bars)
-        const labels = AppState.data.map(d => d['Kennzeichen'] || "?");
-        const barWidth = (canvas.width - 200) / (labels.length * depthsToExport.length);
-        const maxVal = Math.max(...AppState.data.flatMap(r => depthsToExport.map(d => {
-            const suffix = d === '08' ? '0.8' : (d === '16' ? '1.6' : '3.2');
-            return parseFloat(r[`MW [Ωm]_${suffix}`]) || 0;
-        })), 100);
-        
-        const scale = 600 / maxVal;
-        let x = 100;
-        
-        AppState.data.forEach((row, i) => {
-            depthsToExport.forEach((d, di) => {
-                const suffix = d === '08' ? '0.8' : (d === '16' ? '1.6' : '3.2');
-                const mw = parseFloat(row[`MW [Ωm]_${suffix}`]) || 0;
-                const sd = parseFloat(row[`SD [Ωm]_${suffix}`]) || 0;
-                const h = mw * scale;
-                
-                // Draw Bar
-                ctx.fillStyle = di === 0 ? '#ff4d4d' : (di === 1 ? '#4da3ff' : '#4dff4d');
-                ctx.fillRect(x, 700 - h, barWidth - 10, h);
-                
-                // Draw Error Bar (STD)
-                if (sd > 0) {
-                    const sh = sd * scale;
-                    ctx.strokeStyle = '#000000'; ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.moveTo(x + (barWidth - 10)/2, 700 - h - sh);
-                    ctx.lineTo(x + (barWidth - 10)/2, 700 - h + sh);
-                    ctx.stroke();
-                }
-                
-                x += barWidth;
+        chartPositions.forEach(cfg => {
+            const chartObj = renderExportChart(cfg.type, cfg.sd);
+            if (!chartObj) return;
+            const imgId = workbook.addImage({ base64: chartObj.data, extension: 'jpeg' });
+            statSheet.addImage(imgId, {
+                tl: { col: cfg.c, row: cfg.r },
+                ext: { width: 1800, height: 850 } // Taller in Excel
             });
-            x += 20; // Group Gap
         });
 
-        // Labels and Legend (Professional Scientific Labels)
-        ctx.fillStyle = '#000000'; ctx.font = 'bold 22px Inter'; ctx.textAlign = 'center';
-        ctx.fillText('Bodenwiderstand Statistik', canvas.width/2, 40);
-        
-        // X-Axis Label
-        ctx.font = '18px Inter';
-        ctx.fillText('Kennzeichen [km]', canvas.width/2, 780);
-        
-        // Y-Axis Label (Rotated)
-        ctx.save();
-        ctx.translate(30, canvas.height/2);
-        ctx.rotate(-Math.PI / 2);
-        ctx.fillText('ρ [Ω.m]', 0, 0);
-        ctx.restore();
-
-        const imgId = workbook.addImage({ base64: canvas.toDataURL('image/png'), extension: 'png' });
-        statSheet.addImage(imgId, { tl: { col: depthsToExport.length * 3 + 2, row: 2 }, ext: { width: 1000, height: 600 } });
 
         const buffer = await workbook.xlsx.writeBuffer();
         const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -2230,7 +2379,7 @@ async function exportExcel(opts = null) {
         a.click();
         window.URL.revokeObjectURL(url);
         document.getElementById('loadingOverlay').style.display = 'none';
-        showToast("✓ Excel-Bericht erstellt!");
+        showToast("✓ Excel-Statistik erstellt!");
     } catch (err) {
         console.error(err);
         showToast("❌ Fehler beim Excel-Export!", 5000);
@@ -2245,94 +2394,298 @@ function adjustColWidth(col, delta) {
     saveToStorage();
 }
 
+// --- SCIENTIFIC DRAWING HELPERS ---
+function drawScientificBar(ctx, x, y, w, h, color) {
+    ctx.save();
+    // 1. Clipping for Hatching
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+    
+    // 2. Diagonal Hatching
+    ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.globalAlpha = 0.4;
+    for(let i = -h; i < w; i += 6) {
+        ctx.beginPath(); ctx.moveTo(x + i, y); ctx.lineTo(x + i + h, y + h); ctx.stroke();
+    }
+    ctx.restore();
+
+    // 3. Outline
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = 1;
+    ctx.strokeRect(x, y, w, h);
+
+    // 4. Cylinder Top (Ellipse)
+    ctx.fillStyle = color; ctx.globalAlpha = 0.2;
+    ctx.beginPath(); ctx.ellipse(x + w/2, y, w/2, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1; ctx.stroke();
+}
+
 // --- INTERACTIVE APP PLOT ---
 function renderAppPlot() {
     const container = document.getElementById('appPlotContainer');
     if (!container) return;
     
-    const data = AppState.data;
-    const depths = ['0.8', '1.6', '3.2'].filter(d => !AppState.hiddenColumns.has(d === '0.8' ? '08' : (d === '1.6' ? '16' : '32')));
+    const activeDepths = ['0.8', '1.6', '3.2'].filter(d => !AppState.hiddenColumns.has(d === '0.8' ? '08' : (d === '1.6' ? '16' : '32')));
+    const plotData = AppState.data.filter(row => {
+        return activeDepths.some(d => {
+            const mwKey = Object.keys(row).find(k => k.includes('MW') && k.includes(d));
+            return mwKey && row[mwKey] && parseFloat(row[mwKey]) > 0;
+        });
+    });
     
-    if (data.length === 0 || depths.length === 0) {
-        container.innerHTML = '<div style="text-align:center;color:#888;padding:40px;">Keine Daten für Statistik vorhanden</div>';
+    if (plotData.length === 0 || activeDepths.length === 0) {
+        container.innerHTML = `
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:400px; color:#64748b; font-family:var(--font-display);">
+                <i class="fas fa-chart-area" style="font-size:80px; margin-bottom:20px; opacity:0.3;"></i>
+                <div style="font-weight:700; font-size:24px; letter-spacing:1px;">KEINE DATEN ZUR ANALYSE</div>
+                <div style="font-size:16px; margin-top:5px; opacity:0.7;">Bitte Messwerte (MW) in die Tabelle eingeben.</div>
+            </div>`;
         return;
     }
 
-    container.innerHTML = '<canvas id="liveChartCanvas" style="width:100%; height:250px; cursor:crosshair;"></canvas>';
+    const minW = Math.max(container.clientWidth, plotData.length * 120);
+    const minH = 650;
+
+    container.style.overflow = 'auto';
+    container.style.maxHeight = '80vh';
+    container.innerHTML = `<canvas id="liveChartCanvas" style="width:${minW}px; height:${minH}px; cursor:crosshair;"></canvas>`;
+    
     const canvas = document.getElementById('liveChartCanvas');
     const ctx = canvas.getContext('2d');
     
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = canvas.clientWidth * dpr;
-    canvas.height = 250 * dpr;
+    canvas.width = minW * dpr;
+    canvas.height = minH * dpr;
     ctx.scale(dpr, dpr);
 
-    const w = canvas.clientWidth, h = 250;
-    const pad = { top: 30, bottom: 50, left: 60, right: 20 };
+    const w = minW, h = minH;
+    
+    // Standard Dashboard Sizing
+    const fsTitle = 24;
+    const fsLabel = 14;
+    const fsTick = 12;
+    
+    const pad = { 
+        top: 70, 
+        bottom: 90, 
+        left: 100, 
+        right: 40 
+    }; 
     const chartW = w - pad.left - pad.right;
     const chartH = h - pad.top - pad.bottom;
 
-    let maxV = 100;
-    data.forEach(row => {
-        depths.forEach(d => {
-            const k = Object.keys(row).find(key => key.includes('MW') && key.includes(d));
-            if (k) maxV = Math.max(maxV, parseFloat(row[k]) || 0);
+    let maxV = 10;
+    plotData.forEach(row => {
+        activeDepths.forEach(d => {
+            const mwKey = Object.keys(row).find(k => k.includes('MW') && k.includes(d));
+            const val = mwKey ? parseFloat(row[mwKey]) || 0 : 0;
+            const sdKey = Object.keys(row).find(k => k.includes('SD') && k.includes(d));
+            const sdVal = (AppState.showStd && sdKey) ? parseFloat(row[sdKey]) || 0 : 0;
+            maxV = Math.max(maxV, val + sdVal);
         });
     });
-    maxV *= 1.1;
+    maxV *= 1.15;
 
-    // Grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
-    for(let i=0; i<=4; i++) {
-        const y = pad.top + chartH - (chartH * (i/4));
-        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + chartW, y); ctx.stroke();
-        ctx.fillStyle = '#666'; ctx.font = '10px Inter'; ctx.textAlign = 'right';
-        ctx.fillText(Math.round(maxV * (i/4)), pad.left - 10, y + 3);
+    // Background
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.4)';
+    ctx.fillRect(pad.left, pad.top, chartW, chartH);
+
+    // Ticks & Axis (Neon Style)
+    ctx.strokeStyle = '#64748b'; ctx.lineWidth = 3;
+    ctx.beginPath(); 
+    ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + chartH); 
+    ctx.lineTo(pad.left + chartW, pad.top + chartH); ctx.stroke();
+
+    // LEGEND AT TOP (Horizontal Layout)
+    const colors = { '0.8': '#ff00ff', '1.6': '#ffff00', '3.2': '#00ffff' };
+    const legW = 120;
+    const legStartX = pad.left + (chartW - (activeDepths.length * legW)) / 2;
+    activeDepths.forEach((d, di) => {
+        const lx = legStartX + (di * legW);
+        const ly = 25;
+        const mSize = 14;
+        ctx.strokeStyle = colors[d]; ctx.lineWidth = 2; ctx.beginPath();
+        
+        // Marker Logic: Balken = Squares, Scatter = Unique Markers
+        if (AppState.chartType === 'balken') {
+            ctx.fillStyle = colors[d] + '44';
+            ctx.fillRect(lx, ly, mSize, mSize);
+            ctx.rect(lx, ly, mSize, mSize);
+        } else {
+            if (d === '0.8') ctx.arc(lx + mSize/2, ly + mSize/2, mSize/2, 0, Math.PI*2);
+            else if (d === '1.6') ctx.rect(lx, ly, mSize, mSize);
+            else {
+                ctx.moveTo(lx + mSize/2, ly); ctx.lineTo(lx + mSize, ly + mSize/2); ctx.lineTo(lx + mSize/2, ly + mSize); ctx.lineTo(lx, ly + mSize/2); ctx.closePath();
+            }
+        }
+        ctx.stroke();
+        
+        ctx.fillStyle = '#fff'; ctx.font = `bold 14px 'Outfit', sans-serif`; ctx.textAlign = 'left';
+        ctx.fillText(`${d}m`, lx + mSize * 1.5, ly + mSize * 0.85);
+    });
+
+    // Axis Titles
+    ctx.fillStyle = '#fff'; ctx.font = `900 ${fsTitle}px 'Outfit', sans-serif`; ctx.textAlign = 'center';
+    ctx.fillText('KILOMETRIERUNG [km]', pad.left + chartW/2, h - 15);
+    
+    ctx.save(); ctx.translate(40, pad.top + chartH/2); ctx.rotate(-Math.PI/2);
+    ctx.fillText('ρ [Ωm]', 0, 0); ctx.restore();
+
+    // Y-Axis Major & Minor Ticks
+    ctx.textAlign = 'right'; ctx.font = `bold ${fsTick}px 'Inter', sans-serif`;
+    for(let i=0; i<=10; i++) {
+        const val = (maxV * (i/10));
+        const y = pad.top + chartH - (chartH * (i/10));
+        const isMajor = i % 2 === 0;
+        
+        if(isMajor) {
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + chartW, y); ctx.stroke();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left - 10, y); ctx.stroke();
+            ctx.fillStyle = '#fff';
+            ctx.fillText(val.toFixed(1), pad.left - 15, y + 5);
+        } else {
+            ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left - 6, y); ctx.stroke();
+        }
     }
 
-    const bG = chartW / data.length;
-    const bW = (bG * 0.7) / depths.length;
+    const bG = chartW / Math.max(1, plotData.length);
     const barAreas = [];
 
-    data.forEach((row, i) => {
-        const gX = pad.left + (i * bG);
-        depths.forEach((d, di) => {
-            const k = Object.keys(row).find(key => key.includes('MW') && key.includes(d));
-            const val = k ? parseFloat(row[k]) || 0 : 0;
-            const bH = (val / maxV) * chartH;
-            const bx = gX + (di * bW);
-            const by = pad.top + chartH - bH;
+    // X-Axis Major & Minor Ticks
+    ctx.textAlign = 'center'; ctx.font = `bold ${fsTick}px 'Inter', sans-serif`;
+    plotData.forEach((row, i) => {
+        const x = pad.left + (i * bG) + bG/2;
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(x, pad.top + chartH); ctx.lineTo(x, pad.top + chartH + 10); ctx.stroke();
+        
+        ctx.fillStyle = '#fff';
+        let rawKz = row['Kennzeichen'] || (i+1).toString();
+        let displayKz = rawKz;
+        if (!isNaN(parseFloat(rawKz)) && isFinite(rawKz)) {
+            displayKz = (parseFloat(rawKz) / 1000).toFixed(3);
+        }
+        ctx.fillText(displayKz, x, pad.top + chartH + 30);
 
-            ctx.fillStyle = di === 0 ? '#ff4d4d' : (di === 1 ? '#4da3ff' : '#4dff4d');
-            ctx.fillRect(bx, by, bW - 2, bH);
-            barAreas.push({ x: bx, y: by, w: bW, h: bH, idx: i, kz: row['Kennzeichen'] });
-        });
-
-        if (data.length < 15 || i % Math.ceil(data.length/10) === 0) {
-            ctx.fillStyle = '#888'; ctx.textAlign = 'center';
-            ctx.fillText(row['Kennzeichen'] || i+1, gX + bG/2, pad.top + chartH + 15);
+        if (i < plotData.length - 1) {
+            const mx = pad.left + (i * bG) + bG;
+            ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(mx, pad.top + chartH); ctx.lineTo(mx, pad.top + chartH + 6); ctx.stroke();
         }
     });
 
-    // Labels
-    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Inter'; ctx.textAlign = 'center';
-    ctx.fillText('Kennzeichen [km]', pad.left + chartW/2, h - 10);
-    ctx.save(); ctx.translate(15, h/2); ctx.rotate(-Math.PI/2); ctx.fillText('ρ [Ω.m]', 0, 0); ctx.restore();
+    if (AppState.chartType === 'balken') {
+        const groupW = bG * 0.8;
+        const barW = groupW / (activeDepths.length || 1);
+        plotData.forEach((row, i) => {
+            const startX = pad.left + (i * bG) + (bG - groupW) / 2;
+            activeDepths.forEach((d, di) => {
+                const mwKey = Object.keys(row).find(k => k.includes('MW') && k.includes(d));
+                const val = mwKey ? parseFloat(row[mwKey]) || 0 : 0;
+                if (val <= 0) return;
+
+                const bx = startX + (di * barW);
+                const by = pad.top + chartH - (val / maxV) * chartH;
+                const bw = Math.max(4, barW - 6);
+                const bh = (val / maxV) * chartH;
+
+                drawScientificBar(ctx, bx, by, bw, bh, colors[d]);
+                
+                if (AppState.showStd) {
+                    const sdKey = Object.keys(row).find(k => k.includes('SD') && k.includes(d));
+                    const sdVal = sdKey ? parseFloat(row[sdKey]) || 0 : 0;
+                    if (sdVal > 0) {
+                        const sdH = (sdVal / maxV) * chartH;
+                        ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+                        ctx.beginPath();
+                        ctx.moveTo(bx + bw/2, by - sdH); ctx.lineTo(bx + bw/2, by + sdH);
+                        ctx.moveTo(bx + bw/2 - 10, by - sdH); ctx.lineTo(bx + bw/2 + 10, by - sdH);
+                        ctx.moveTo(bx + bw/2 - 10, by + sdH); ctx.lineTo(bx + bw/2 + 10, by + sdH);
+                        ctx.stroke();
+                    }
+                }
+                barAreas.push({ x: bx, y: by - 10, w: bw, h: bh + 20, idx: AppState.data.indexOf(row) });
+            });
+        });
+    } else {
+        activeDepths.forEach(d => {
+            const pts = [];
+            plotData.forEach((row, i) => {
+                const mwKey = Object.keys(row).find(k => k.includes('MW') && k.includes(d));
+                const val = mwKey ? parseFloat(row[mwKey]) || 0 : 0;
+                if (val <= 0) return;
+                pts.push({
+                    x: pad.left + (i * bG) + bG/2,
+                    y: pad.top + chartH - (val / maxV) * chartH,
+                    val: val,
+                    row: row
+                });
+            });
+
+            if (pts.length === 0) return;
+
+            ctx.strokeStyle = colors[d] + '88'; ctx.lineWidth = 4; ctx.lineJoin = 'round';
+            ctx.beginPath();
+            pts.forEach((p, pi) => { if(pi === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+            ctx.stroke();
+
+            pts.forEach(p => {
+                if (AppState.showStd) {
+                    const sdKey = Object.keys(p.row).find(k => k.includes('SD') && k.includes(d));
+                    const sdVal = sdKey ? parseFloat(p.row[sdKey]) || 0 : 0;
+                    if (sdVal > 0) {
+                        const sdH = (sdVal / maxV) * chartH;
+                        ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+                        ctx.beginPath();
+                        ctx.moveTo(p.x, p.y - sdH); ctx.lineTo(p.x, p.y + sdH);
+                        ctx.moveTo(p.x - 10, p.y - sdH); ctx.lineTo(p.x + 10, p.y - sdH);
+                        ctx.moveTo(p.x - 10, p.y + sdH); ctx.lineTo(p.x + 10, p.y + sdH);
+                        ctx.stroke();
+                    }
+                }
+
+                ctx.strokeStyle = colors[d]; ctx.lineWidth = 5; ctx.beginPath();
+                if (d === '0.8') ctx.arc(p.x, p.y, 12, 0, Math.PI*2);
+                else if (d === '1.6') ctx.rect(p.x - 12, p.y - 12, 24, 24);
+                else {
+                    ctx.moveTo(p.x, p.y - 15); ctx.lineTo(p.x + 15, p.y); ctx.lineTo(p.x, p.y + 15); ctx.lineTo(p.x - 15, p.y); ctx.closePath();
+                }
+                ctx.stroke();
+                barAreas.push({ x: p.x - 20, y: p.y - 20, w: 40, h: 40, idx: AppState.data.indexOf(p.row) });
+            });
+        });
+    }
+
 
     canvas.onclick = (e) => {
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-        const hit = barAreas.find(b => mx >= b.x && mx <= b.x + b.w);
+        const hit = barAreas.find(b => mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h);
         if (hit) {
-            const trs = document.querySelectorAll('#tableBody tr');
-            if (trs[hit.idx]) {
-                trs[hit.idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
-                trs[hit.idx].classList.add('row-highlight-pulse');
-                setTimeout(() => trs[hit.idx].classList.remove('row-highlight-pulse'), 2000);
-                showToast(`🚀 Fokus: Kennzeichen ${hit.kz || hit.idx + 1}`);
-            }
+            switchTab('table');
+            setTimeout(() => {
+                const trs = document.querySelectorAll('#tableBody tr');
+                if(trs[hit.idx]) {
+                    trs[hit.idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    trs[hit.idx].style.boxShadow = 'inset 0 0 20px rgba(0, 242, 255, 0.5)';
+                    setTimeout(() => trs[hit.idx].style.boxShadow = '', 2000);
+                }
+            }, 100);
         }
     };
+}
+
+
+
+function updateChartUI() {
+    const bBalken = document.getElementById('btnChartBalken');
+    const bScatter = document.getElementById('btnChartScatter');
+    const bStdOn = document.getElementById('btnStdOn');
+    const bStdOff = document.getElementById('btnStdOff');
+
+    if (bBalken) bBalken.classList.toggle('active', AppState.chartType === 'balken');
+    if (bScatter) bScatter.classList.toggle('active', AppState.chartType === 'scatter');
+    if (bStdOn) bStdOn.classList.toggle('active', AppState.showStd);
+    if (bStdOff) bStdOff.classList.toggle('active', !AppState.showStd);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2359,7 +2712,7 @@ function openColManager() {
         item.style.cursor = 'pointer';
         item.style.transition = '0.3s';
         
-        // "Jangan Hacken" - Use checkbox icons for clarity
+        // Checkbox UI für Klarheit
         const iconClass = isHidden ? 'far fa-square' : 'fas fa-check-square';
         const statusColor = isHidden ? '#555' : (DEPTH_COLORS[g.class]?.border || '#fff');
 
@@ -2383,25 +2736,13 @@ function openColManager() {
 function toggleColumnGroup(cls, groupName) {
     if (AppState.hiddenColumns.has(cls)) {
         AppState.hiddenColumns.delete(cls);
-        // Also sync map visibility if it's a depth group
-        if (cls === '08') AppState.hiddenMapColors.delete('#ff00ff');
-        if (cls === '16') AppState.hiddenMapColors.delete('#ffff00');
-        if (cls === '32') AppState.hiddenMapColors.delete('#00ffff');
-        showToast(`👁️ ${groupName} eingeblendet`);
     } else {
         AppState.hiddenColumns.add(cls);
-        if (cls === '08') AppState.hiddenMapColors.add('#ff00ff');
-        if (cls === '16') AppState.hiddenMapColors.add('#ffff00');
-        if (cls === '32') AppState.hiddenMapColors.add('#00ffff');
-        showToast(`🙈 ${groupName} ausgeblendet`);
     }
-    
-    // Sync map layers immediately if map is active
-    if (window.refreshMapVisibility) refreshMapVisibility();
     
     renderTable();
     saveToStorage();
-    openColManager(); // Re-render modal to show new state
+    openColManager(); 
 }
 function startLiveTracking() {
     if (!navigator.geolocation) return;
@@ -2415,7 +2756,7 @@ function startLiveTracking() {
         (err) => {
             console.warn("GPS Error:", err);
             const statusText = document.getElementById('gpsStatusText');
-            if(statusText) statusText.innerText = "GPS-Signal schwach";
+            if(statusText) statusText.innerText = "❌ GPS gesperrt / Fehler";
         },
         { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
     );
@@ -2434,7 +2775,7 @@ function updateUserMarker(lat, lng, accuracy) {
     L.circle(latlng, { radius: accuracy, color: '#3b82f6', fillOpacity: 0.1, weight: 1 }).addTo(layers.userLocation);
     
     // Core User Dot
-    const userMarker = L.circleMarker(latlng, {
+    AppState.userMarker = L.circleMarker(latlng, {
         radius: 8,
         fillColor: '#3b82f6',
         color: '#fff',
