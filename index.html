@@ -1,15 +1,14 @@
 <!DOCTYPE html>
 <html lang="de">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.1, maximum-scale=5.0, user-scalable=yes">
-    <title>Bodenwiderstandsmessung-GUI</title>
+    <title>Messstellen Manager Pro</title>
 
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <!-- Leaflet + Draw -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
@@ -21,11 +20,8 @@
     <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
     <!-- html2canvas for Snipping -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-
-    <!-- Cache Busting -->
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <meta http-equiv="Pragma" content="no-cache" />
-    <meta http-equiv="Expires" content="0" />
+    <!-- JSZip for native Excel chart injection -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
     <!-- PWA & iOS Support -->
     <link rel="manifest" href="manifest.json">
@@ -35,413 +31,381 @@
     <meta name="apple-mobile-web-app-title" content="Messstellen">
     <link rel="apple-touch-icon" href="app-icon.png">
 
-    <link rel="stylesheet" href="styles.css?v=200">
+    <link rel="stylesheet" href="styles.css">
 </head>
+<body>
+    <!-- Hidden file input -->
+    <input type="file" id="fileInput" hidden accept=".xlsx,.xls,.csv">
 
-    <!-- High-End Welcome Overlay -->
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <p>Verarbeitung läuft...</p>
+    </div>
+
+    <!-- Welcome Screen -->
     <div id="welcomeOverlay" class="welcome-overlay">
-        <div class="welcome-content" style="padding: 50px; width: 480px; display: flex; flex-direction: column; align-items: center;">
-            <img src="idb_logo.jpg" alt="Logo" class="welcome-logo" style="margin-bottom: 20px;">
-            <h1 style="color: white; font-size: 26px; line-height: 1.2; letter-spacing: 2px; font-weight: 900; margin-bottom: 40px; text-transform: uppercase; text-align: center;">
-                Bodenwiderstandsmessung<br>Messstellen
-            </h1>
+        <div class="welcome-content">
+            <img src="idb_logo.jpg" alt="NRW-IDB Logo" class="welcome-logo">
+            <h1>Bodenwiderstandsmessung</h1>
+            <p class="welcome-subtitle">Feldmessung & Dokumentation</p>
             
             <div class="welcome-actions">
-                <button class="welcome-btn" id="btnWelcomeBrowse"><i class="fas fa-file-upload"></i> DATEI ÖFFNEN</button>
-                <div class="divider"><span>ODER</span></div>
-                <button class="welcome-btn" id="btnWelcomeBlank"><i class="fas fa-plus-circle"></i> NEUES PROJEKT</button>
+                <button class="welcome-btn" id="btnWelcomeBrowse">
+                    <i class="fas fa-file-upload"></i> Datei öffnen
+                </button>
+                <div class="divider"><span>oder</span></div>
+                <button class="welcome-btn" id="btnWelcomeBlank">
+                    <i class="fas fa-plus-circle"></i> Neues Projekt
+                </button>
             </div>
             
             <div id="fileStatus" class="file-status">Keine Datei ausgewählt</div>
             
             <button class="btn-start-main" id="btnFinalStart" disabled>
-                PROJEKT STARTEN
+                Projekt starten
             </button>
             
             <div class="welcome-footer">
-                NRW-IDB | Ihr Partner für Messtechnik & Bauservice
+                NRW-IDB &middot; Messtechnik & Bauservice
             </div>
         </div>
     </div>
 
+    <!-- Main Application -->
     <div class="app-layout" id="mainApp" style="display: none;">
+        
         <!-- Header -->
         <header class="header-top">
             <div class="header-left">
-                <button class="btn-modern btn-accent" id="btnHome" title="Zur Startseite"><i class="fas fa-home"></i> <span>STARTSEITE</span></button>
-                <button class="btn-modern btn-accent" id="btnBrowse" title="Datei öffnen"><i class="fas fa-file-upload"></i> <span>DATEI ÖFFNEN</span></button>
-                <button class="btn-modern btn-accent" id="btnStartBlank" title="Starten"><i class="fas fa-play"></i> <span>STARTEN</span></button>
-                
-                <div style="width: 1px; height: 20px; background: rgba(255,255,255,0.2); margin: 0 5px;"></div>
-                
-                <button class="btn-modern" id="btnUndo" title="Rückgängig"><i class="fas fa-undo"></i></button>
-                <button class="btn-modern" id="btnRedo" title="Wiederholen"><i class="fas fa-redo"></i></button>
-                <button class="btn-modern btn-accent" id="btnColManager" title="Spalten-Verwaltung"><i class="fas fa-columns"></i> <span>VERWALTUNG</span></button>
+                <button class="btn-icon" id="btnHome" title="Startseite"><i class="fas fa-home"></i></button>
+                <button class="btn-icon" id="btnBrowse" title="Datei öffnen"><i class="fas fa-folder-open"></i></button>
+                <button class="btn-icon" id="btnStartBlank" title="Neu starten"><i class="fas fa-play"></i></button>
+                <div class="header-divider"></div>
+                <button class="btn-icon" id="btnUndo" title="Rückgängig"><i class="fas fa-undo"></i></button>
+                <button class="btn-icon" id="btnRedo" title="Wiederholen"><i class="fas fa-redo"></i></button>
             </div>
             <div class="header-center">
-                <div class="standort-container">
-                    <input type="text" id="projectName" placeholder="Standort eingeben..." value="Bodenwiderstandsmessung-GUI">
-                </div>
+                <input type="text" id="projectName" class="project-name-input" placeholder="Projektname eingeben..." value="">
             </div>
             <div class="header-right">
-                <button class="btn-modern btn-accent" id="btnOpenProjects" title="Projekte"><i class="fas fa-folder-open"></i> <span>PROJEKTE</span></button>
-                <button class="btn-modern btn-success" id="btnSaveAll" title="Speichern"><i class="fas fa-save"></i> <span>SPEICHERN</span></button>
-                <button class="btn-modern btn-accent" id="btnExportExcel" title="Excel Export"><i class="fas fa-file-excel"></i> <span>EXCEL</span></button>
+                <button class="btn-icon" id="btnOpenProjects" title="Projekte"><i class="fas fa-folder-open"></i></button>
+                <button class="btn-icon btn-save" id="btnSaveAll" title="Speichern"><i class="fas fa-save"></i></button>
+                <button class="btn-icon btn-export" id="btnExportExcel" title="Excel Export"><i class="fas fa-file-excel"></i></button>
             </div>
         </header>
 
-        <!-- Main Actions / Tab Bar -->
-        <section class="action-bar" style="display: flex; gap: 10px; padding: 0 40px; margin-top: 5px;">
-            <button class="btn-modern btn-accent active" style="flex: 1; justify-content: center;" id="btnTabTable" onclick="switchTab('table')"><i class="fas fa-table"></i> TABELLE</button>
-            <button class="btn-modern btn-accent" style="flex: 1; justify-content: center;" id="btnTabPlot" onclick="switchTab('plot')"><i class="fas fa-chart-bar"></i> STATISTIK</button>
-            <button class="btn-modern btn-accent" style="flex: 1; justify-content: center;" id="btnToggleMap"><i class="fas fa-map-marked-alt"></i> KARTE</button>
+        <!-- Tab Navigation -->
+        <nav class="tab-bar">
+            <button class="tab-btn active" id="btnTabTable" data-tab="table">
+                <i class="fas fa-table"></i> Tabelle
+            </button>
+            <button class="tab-btn" id="btnTabPlot" data-tab="plot">
+                <i class="fas fa-chart-bar"></i> Statistik
+            </button>
+            <button class="tab-btn" id="btnToggleMap" data-tab="map">
+                <i class="fas fa-map-marked-alt"></i> Karte
+            </button>
+        </nav>
+
+        <!-- Toolbar -->
+        <section class="toolbar">
+            <div class="toolbar-group">
+                <span class="toolbar-label">Spalte</span>
+                <div class="toolbar-actions">
+                    <button class="toolbar-btn" id="btnAddCol" title="Spalte hinzufügen"><i class="fas fa-plus"></i></button>
+                    <button class="toolbar-btn" id="btnDeleteCol" title="Spalte löschen"><i class="fas fa-minus"></i></button>
+                </div>
+            </div>
+            <div class="toolbar-group">
+                <span class="toolbar-label">Zeile</span>
+                <div class="toolbar-actions">
+                    <button class="toolbar-btn" id="btnAddRow" title="Zeile hinzufügen"><i class="fas fa-plus"></i></button>
+                    <button class="toolbar-btn" id="btnDeleteRow" title="Zeile löschen"><i class="fas fa-minus"></i></button>
+                </div>
+            </div>
+            <div class="toolbar-group">
+                <span class="toolbar-label">Format</span>
+                <div class="toolbar-actions">
+                    <button class="toolbar-btn" id="btnBold" title="Fett"><i class="fas fa-bold"></i></button>
+                    <button class="toolbar-btn" id="btnItalic" title="Kursiv"><i class="fas fa-italic"></i></button>
+                    <button class="toolbar-btn" id="btnUnderline" title="Unterstrichen"><i class="fas fa-underline"></i></button>
+                    <button class="toolbar-btn" id="btnBgColor" title="Hintergrundfarbe"><i class="fas fa-fill-drip"></i></button>
+                </div>
+            </div>
+            <div class="toolbar-group">
+                <span class="toolbar-label">Ansicht</span>
+                <div class="toolbar-actions">
+                    <button class="toolbar-btn" onclick="handleZoom(-10)"><i class="fas fa-search-minus"></i></button>
+                    <span id="zoomLevelDisplay" class="zoom-display">100%</span>
+                    <button class="toolbar-btn" onclick="handleZoom(10)"><i class="fas fa-search-plus"></i></button>
+                </div>
+            </div>
+            <div class="toolbar-group">
+                <button class="toolbar-btn" id="btnColManager" title="Spalten verwalten"><i class="fas fa-columns"></i></button>
+                <button class="toolbar-btn" id="btnRefreshTable" title="Aktualisieren"><i class="fas fa-sync-alt"></i></button>
+            </div>
         </section>
 
-        <!-- Formatting Toolbar (MATCHING IMAGE) -->
-        <section class="toolbar-formatting">
-            <div class="format-group">
-                <span class="group-label">SPALTE</span>
-                <div class="control-pill">
-                    <button class="pill-btn" id="btnAddCol"><i class="fas fa-plus"></i></button>
-                    <button class="pill-btn" id="btnDeleteCol"><i class="fas fa-minus"></i></button>
-                </div>
-            </div>
-
-            <div class="format-group">
-                <span class="group-label">ZEILE</span>
-                <div class="control-pill">
-                    <button class="pill-btn" id="btnAddRow"><i class="fas fa-plus"></i></button>
-                    <button class="pill-btn" id="btnDeleteRow"><i class="fas fa-minus"></i></button>
-                </div>
-            </div>
-
-            <div class="format-group">
-                <span class="group-label">BEARBEITUNG</span>
-                <div class="format-tools">
-                    <button class="tool-icon-btn" id="btnBold"><i class="fas fa-bold"></i></button>
-                    <button class="tool-icon-btn" id="btnItalic"><i class="fas fa-italic"></i></button>
-                    <button class="tool-icon-btn" id="btnUnderline"><i class="fas fa-underline"></i></button>
-                </div>
-                <div class="format-tools">
-                    <button class="tool-icon-btn" id="btnAlignLeft"><i class="fas fa-align-left"></i></button>
-                    <button class="tool-icon-btn" id="btnAlignCenter"><i class="fas fa-align-center"></i></button>
-                    <button class="tool-icon-btn" id="btnAlignRight"><i class="fas fa-align-right"></i></button>
-                </div>
-                <button class="tool-icon-btn" id="btnBgColor" title="Farbe"><i class="fas fa-fill-drip"></i></button>
-            </div>
-
-            <div class="format-group">
-                <span class="group-label">ANSICHT</span>
-                <div class="control-pill" style="min-width: 120px;">
-                    <button class="pill-btn" onclick="handleZoom(-10)"><i class="fas fa-minus"></i></button>
-                    <span id="zoomLevelDisplay" style="font-family: var(--font-data); font-size: 11px; font-weight: 800; color: #fff; width: 45px; text-align: center;">100%</span>
-                    <button class="pill-btn" onclick="handleZoom(10)"><i class="fas fa-plus"></i></button>
-                </div>
-                <button class="btn-refresh-outlined" id="btnRefreshTable">
-                    <i class="fas fa-sync-alt"></i> <span>REFRESH</span>
-                </button>
-            </div>
-        </section>
-
-        <!-- Main Workspace -->
-        <main class="content-viewport">
-
-            <!-- TAB: TABLE -->
-            <div id="tabTable" class="tab-content active">
+        <!-- Main Content Area -->
+        <main class="content-area">
+            <!-- Table Tab -->
+            <div id="tabTable" class="tab-panel active">
                 <div class="table-wrapper">
-                    <table class="modern-table" id="mainTable">
+                    <table class="data-table" id="mainTable">
                         <thead id="tableHead"></thead>
                         <tbody id="tableBody"></tbody>
                     </table>
-                    <div id="emptyState" class="empty-state"
-                        style="display:none; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); padding: 50px;">
-                        <i class="fas fa-layer-group"
-                            style="font-size: 64px; margin-bottom: 20px; color: var(--accent-primary); opacity: 0.5;"></i>
-                        <h2>Bereit für High-End Messungen</h2>
-                        <p>Wählen Sie "Datei öffnen" oder "Starten", um zu beginnen.</p>
-                    </div>
+                </div>
+                <div id="emptyState" class="empty-state" style="display:none;">
+                    <i class="fas fa-layer-group"></i>
+                    <h2>Bereit für Messungen</h2>
+                    <p>Öffnen Sie eine Datei oder starten Sie ein neues Projekt.</p>
                 </div>
             </div>
 
-            <!-- TAB: PLOT -->
-            <div id="tabPlot" class="tab-content">
-                <div style="padding: 20px;">
-                    <div class="sidebar-title" style="color: #3b82f6; letter-spacing: 2px; font-size: 14px; margin-bottom: 20px; text-align: center;">MESSDATEN-ANALYSE</div>
-                    
-                    <!-- Plot Controls (Modern Toggle Switch Style) -->
-                    <div style="display: flex; justify-content: center; gap: 30px; margin-bottom: 30px;">
-                        <div class="control-pill" style="background: rgba(255,255,255,0.05); padding: 5px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); display: flex; gap: 5px;">
-                            <button id="btnChartBalken" class="pill-btn active" style="min-width: 100px; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 800; letter-spacing: 1px;">BALKEN</button>
-                            <button id="btnChartScatter" class="pill-btn" style="min-width: 100px; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 800; letter-spacing: 1px;">SCATTER</button>
-                        </div>
-                        <div class="control-pill" style="background: rgba(255,255,255,0.05); padding: 5px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); display: flex; gap: 5px;">
-                            <button id="btnStdOn" class="pill-btn" style="min-width: 100px; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 800; letter-spacing: 1px;">STD EIN</button>
-                            <button id="btnStdOff" class="pill-btn active" style="min-width: 100px; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 800; letter-spacing: 1px;">STD AUS</button>
+            <!-- Plot Tab -->
+            <div id="tabPlot" class="tab-panel">
+                <div class="plot-container">
+                    <div class="plot-header">
+                        <h3><i class="fas fa-chart-bar"></i> Messdaten-Analyse</h3>
+                        <div class="plot-controls">
+                            <button class="plot-toggle active" id="btnChartBalken">Balken</button>
+                            <button class="plot-toggle" id="btnChartScatter">Scatter</button>
                         </div>
                     </div>
-
-                    <div id="appPlotContainer" style="background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 15px; min-height: 400px; padding: 20px;"></div>
+                    <div id="appPlotContainer" class="plot-canvas"></div>
                 </div>
-            </div>
-
-            <div class="map-layout" id="mapLayout" style="position: fixed; inset: 0; display: none; z-index: 99999; background: #111; width: 100vw; height: 100vh;">
-                <div id="map" style="flex: 1; height: 100%; background: #111;"></div>
-                
-                <!-- Professional GPS Status Bar -->
-                <div id="gpsStatus" class="gps-status-bar">
-                    <div class="gps-info">
-                        <i class="fas fa-satellite"></i> <span id="gpsStatusText">Suche GPS...</span>
-                        <div id="gpsAccuracyDot" class="accuracy-dot"></div>
-                    </div>
-                    <div id="distanceBadge" class="distance-badge" style="display: none;">
-                        <i class="fas fa-ruler-combined"></i> <span id="distanceValue">0.0</span> m
-                    </div>
-                </div>
-
-                <!-- Professional Windrose (N-S-E-W at Tips) -->
-                <!-- Futuristic HUD Compass -->
-                <div class="map-compass" id="mapCompass">
-                    <div class="needle"></div>
-                    <div style="position: absolute; top: 10px; font-weight: 900; font-size: 10px; color: var(--accent-danger); opacity: 0.8;">N</div>
-                    <div style="position: absolute; bottom: 10px; font-weight: 900; font-size: 10px; color: #fff; opacity: 0.6;">S</div>
-                    <div style="position: absolute; right: 10px; font-weight: 900; font-size: 10px; color: #fff; opacity: 0.6;">E</div>
-                    <div style="position: absolute; left: 10px; font-weight: 900; font-size: 10px; color: #fff; opacity: 0.6;">W</div>
-                </div>
-
-                <aside class="map-sidebar" style="background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(20px); border-left: 1px solid rgba(255,255,255,0.1); z-index: 100001; padding: 20px; overflow-y: auto;">
-                    <div class="sidebar-section">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <div class="sidebar-title" style="color: #3b82f6; letter-spacing: 2px; font-size: 11px; margin-bottom: 0;">KARTEN-STEUERUNG</div>
-                            <button class="btn-modern" id="btnCloseMap" style="padding: 8px 12px; font-size: 11px; border-color: rgba(255,255,255,0.2);">
-                                <i class="fas fa-table"></i> Tabelle
-                            </button>
-                        </div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
-                            <button class="btn-modern" id="btnMapStandard" style="font-size: 11px; padding: 12px; background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; justify-content: center;">Standard</button>
-                            <button class="btn-modern" id="btnMapSatellite" style="font-size: 11px; padding: 12px; background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; justify-content: center;">Google HD</button>
-                        </div>
-                        <button class="btn-modern btn-success" id="btnUploadPlan" style="width: 100%; margin-bottom: 15px; justify-content: center;"><i class="fas fa-file-image"></i> Offline-Plan (Eigene Karte)</button>
-                        <input type="file" id="inputPlanImage" hidden accept="image/*">
-                        
-                        <div id="statusIndicator" style="font-size: 12px; color: var(--accent-warning); margin-bottom: 15px; padding: 12px; background: rgba(0,0,0,0.3); border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: center; align-items: center; gap: 8px;">
-                            <i class="fas fa-wifi"></i> Offline-Modus (Standard)
-                        </div>
-
-                    </div>
-
-                    <div class="sidebar-section">
-                        <div class="sidebar-title" style="color: #3b82f6; letter-spacing: 2px; font-size: 11px; margin-bottom: 20px;">GPS & NAVIGATION</div>
-                        
-                        <div style="margin-bottom: 20px;">
-                            <input type="text" id="inpMapSearch" placeholder="Adresse oder Lat, Lng..." 
-                                style="width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 12px; border-radius: 12px; font-size: 13px; outline: none; margin-bottom: 10px;">
-                            <button class="btn-modern btn-accent" id="btnGoToLocation" style="width: 100%; justify-content: center;"><i class="fas fa-search"></i> Standort suchen</button>
-                        </div>
-
-                        <div style="display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 20px;">
-                            <button class="btn-modern" id="btnLocateMe" style="background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; justify-content: center;"><i class="fas fa-location-arrow"></i> Standortermittlung</button>
-                            <button class="btn-modern" id="btnSetStartPoint" style="background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; justify-content: center;"><i class="fas fa-flag-checkered"></i> Startpunkt setzen</button>
-                        </div>
-                    </div>
-
-
-                    <div class="sidebar-section">
-                        <div class="sidebar-title" style="color: #3b82f6;">AUSSCHNITT</div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px;">
-                            <button class="btn-modern" id="btnSnipRect" style="flex-direction: column; padding: 15px 0;"><i class="fas fa-vector-square" style="font-size: 20px;"></i><span style="font-size: 9px; margin-top: 5px;">RECHTECK</span></button>
-                            <button class="btn-modern" id="btnSnipCircle" style="flex-direction: column; padding: 15px 0;"><i class="far fa-circle" style="font-size: 20px;"></i><span style="font-size: 9px; margin-top: 5px;">KREIS</span></button>
-                            <button class="btn-modern" id="btnSnipPoly" style="flex-direction: column; padding: 15px 0;"><i class="fas fa-draw-polygon" style="font-size: 20px;"></i><span style="font-size: 9px; margin-top: 5px;">POLYGON</span></button>
-                        </div>
-                    </div>
-
-                    <div class="sidebar-section">
-                        <div class="sidebar-title">MARKER</div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
-                            <button class="btn-modern" id="btnMarker08" style="background: #ff00ff; color: #000; justify-content: center; padding: 12px 0;"><i class="fas fa-map-marker-alt"></i> 0.8m</button>
-                            <button class="btn-modern" id="btnMarker16" style="background: #ffff00; color: #000; justify-content: center; padding: 12px 0;"><i class="fas fa-map-marker-alt"></i> 1.6m</button>
-                            <button class="btn-modern" id="btnMarker32" style="background: #00ffff; color: #000; justify-content: center; padding: 12px 0;"><i class="fas fa-map-marker-alt"></i> 3.2m</button>
-                        </div>
-                    </div>
-
-                    <div class="sidebar-section">
-                        <div class="sidebar-title">LINIEN</div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
-                            <button class="btn-modern" id="btnLine08" style="background: #ff00ff; color: #000; justify-content: center; padding: 12px 0;"><i class="fas fa-grip-lines"></i> 0.8m</button>
-                            <button class="btn-modern" id="btnLine16" style="background: #ffff00; color: #000; justify-content: center; padding: 12px 0;"><i class="fas fa-grip-lines"></i> 1.6m</button>
-                            <button class="btn-modern" id="btnLine32" style="background: #00ffff; color: #000; justify-content: center; padding: 12px 0;"><i class="fas fa-grip-lines"></i> 3.2m</button>
-                        </div>
-                    </div>
-
-                    <div class="sidebar-section">
-                        <div class="sidebar-title">SICHTBARKEIT (EIN/AUS)</div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
-                            <button class="btn-modern" id="btnToggle08" onclick="toggleLayerColor('#ff00ff', 'btnToggle08')" style="border: 1px solid #ff00ff; color: #ff00ff; background: rgba(255,0,255,0.05); justify-content: center;"><i class="fas fa-eye"></i> 0.8m</button>
-                            <button class="btn-modern" id="btnToggle16" onclick="toggleLayerColor('#ffff00', 'btnToggle16')" style="border: 1px solid #ffff00; color: #ffff00; background: rgba(255,255,0,0.05); justify-content: center;"><i class="fas fa-eye"></i> 1.6m</button>
-                            <button class="btn-modern" id="btnToggle32" onclick="toggleLayerColor('#00ffff', 'btnToggle32')" style="border: 1px solid #00ffff; color: #00ffff; background: rgba(0,255,255,0.05); justify-content: center;"><i class="fas fa-eye"></i> 3.2m</button>
-                        </div>
-                    </div>
-
-                    <div class="sidebar-section">
-                        <div class="sidebar-title" style="color: #3b82f6;">NUMMERIERUNG</div>
-                        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;">
-                            <button class="btn-modern num-btn" data-num="1">1</button>
-                            <button class="btn-modern num-btn" data-num="2">2</button>
-                            <button class="btn-modern num-btn" data-num="3">3</button>
-                            <button class="btn-modern num-btn" data-num="4">4</button>
-                            <button class="btn-modern num-btn" data-num="5">5</button>
-                            <button class="btn-modern num-btn" data-num="6">6</button>
-                            <button class="btn-modern num-btn" data-num="7">7</button>
-                            <button class="btn-modern num-btn" data-num="8">8</button>
-                            <button class="btn-modern num-btn" data-num="9">9</button>
-                            <button class="btn-modern num-btn" data-num="10">10</button>
-                        </div>
-                    </div>
-
-                    <div class="sidebar-section" style="margin-top: auto; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.05);">
-                        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                            <button class="btn-modern btn-danger" id="btnClearShapes" style="flex: 1; justify-content: center; font-size: 11px;"><i class="fas fa-eraser"></i> OBJEKTE</button>
-                            <button class="btn-modern btn-danger" id="btnDeleteArea" style="flex: 1; justify-content: center; font-size: 11px;"><i class="fas fa-vector-square"></i> BEREICH</button>
-                        </div>
-                        <button class="btn-modern" id="btnStopAudit" style="width: 100%; background: rgba(255,255,255,0.1); border: 1px solid white; justify-content: center;"><i class="fas fa-mouse-pointer"></i> Mauszeiger</button>
-                    </div>
-                </aside>
             </div>
         </main>
     </div>
 
-    <!-- Modals -->
-    <div class="col-manager" id="colManagerModal">
-        <div
-            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-glass); padding-bottom: 15px;">
-            <h3 style="color: var(--accent-primary);">Spalten Verwaltung</h3>
-            <button class="btn-modern" id="btnCloseColManager"><i class="fas fa-times"></i></button>
-        </div>
-        <div id="colManagerGrid"
-            style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-height: 400px; overflow-y: auto;">
-        </div>
-    </div>
-
-    <!-- Standorte Modal -->
-    <div class="col-manager" id="standortModal">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h3>Standorte verwalten</h3>
-            <button class="btn-modern" id="btnCloseStandortModal"><i class="fas fa-times"></i></button>
-        </div>
-        <div id="standortGrid" style="max-height: 300px; overflow-y: auto;">
-            <p style="color: var(--text-dim); text-align: center; padding: 20px;">Keine Standorte erfasst.</p>
-        </div>
-    </div>
-
-    <!-- ===== EXCEL EXPORT DEPTH SELECTOR MODAL ===== -->
-    <div id="exportModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:300000; display:none; align-items:center; justify-content:center;">
-        <div style="background:#1e293b; border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:35px; width:480px; box-shadow:0 30px 80px rgba(0,0,0,0.8);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:25px;">
-                <h3 style="color:#10b981; font-size:16px; letter-spacing:1px;"><i class="fas fa-file-excel"></i> &nbsp;EXCEL EXPORT</h3>
-                <button onclick="document.getElementById('exportModal').style.display='none'" style="background:transparent;border:none;color:#888;font-size:18px;cursor:pointer;">✕</button>
+    <!-- Map Fullscreen View -->
+    <div class="map-layout" id="mapLayout">
+        <div id="map" class="map-view"></div>
+        
+        <!-- GPS Status -->
+        <div id="gpsStatus" class="gps-bar">
+            <div class="gps-info">
+                <i class="fas fa-satellite"></i>
+                <span id="gpsStatusText">GPS bereit</span>
+                <div id="gpsAccuracyDot" class="gps-dot"></div>
             </div>
-            <p style="color:#94a3b8; font-size:12px; margin-bottom:20px;">Wähle die Messtiefen die exportiert werden sollen:</p>
-
-            <div style="display:flex; flex-direction:column; gap:14px; margin-bottom:30px;">
-                <!-- 0.8m -->
-                <label id="exportLabel08" style="display:flex; align-items:center; gap:16px; padding:16px 20px; border-radius:12px; border:2px solid #ff00ff; background:rgba(255,0,255,0.08); cursor:pointer; transition:0.2s;">
-                    <input type="checkbox" id="exportChk08" checked style="width:18px;height:18px;accent-color:#ff00ff;">
-                    <div style="width:16px;height:16px;border-radius:50%;background:#ff00ff;box-shadow:0 0 10px #ff00ff;"></div>
-                    <div>
-                        <div style="font-weight:700; font-size:14px; color:#ff00ff;">0.8 m</div>
-                    </div>
-                </label>
-
-                <!-- 1.6m -->
-                <label id="exportLabel16" style="display:flex; align-items:center; gap:16px; padding:16px 20px; border-radius:12px; border:2px solid #ffff00; background:rgba(255,255,0,0.06); cursor:pointer; transition:0.2s;">
-                    <input type="checkbox" id="exportChk16" checked style="width:18px;height:18px;accent-color:#ffff00;">
-                    <div style="width:16px;height:16px;border-radius:50%;background:#ffff00;box-shadow:0 0 10px #ffff00;"></div>
-                    <div>
-                        <div style="font-weight:700; font-size:14px; color:#ffff00;">1.6 m</div>
-                    </div>
-                </label>
-
-                <!-- 3.2m -->
-                <label id="exportLabel32" style="display:flex; align-items:center; gap:16px; padding:16px 20px; border-radius:12px; border:2px solid #00ffff; background:rgba(0,255,255,0.06); cursor:pointer; transition:0.2s;">
-                    <input type="checkbox" id="exportChk32" checked style="width:18px;height:18px;accent-color:#00ffff;">
-                    <div style="width:16px;height:16px;border-radius:50%;background:#00ffff;box-shadow:0 0 10px #00ffff;"></div>
-                    <div>
-                        <div style="font-weight:700; font-size:14px; color:#00ffff;">3.2 m</div>
-                    </div>
-                </label>
-            </div>
-
-            <div style="display:flex; gap:12px; justify-content:flex-end;">
-                <button onclick="document.getElementById('exportModal').style.display='none'" class="btn-modern" style="padding:12px 24px;">Abbrechen</button>
-                <button onclick="confirmExportDepths()" class="btn-modern btn-success" style="padding:12px 28px; background:#059669; border-color:#059669; font-weight:700;"><i class="fas fa-file-excel"></i> &nbsp;Exportieren</button>
+            <div id="distanceBadge" class="distance-badge" style="display:none;">
+                <i class="fas fa-ruler-combined"></i>
+                <span id="distanceValue">0.0</span> m
             </div>
         </div>
-    </div>
 
-    <!-- Snipping Editor Pro -->
-    <div id="snipConfirmModal" class="wireframe-modal"
-        style="display:none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 750px; padding: 0;">
-        <div class="wireframe-header" style="display: flex; align-items: center; gap: 15px; padding: 15px 25px;">
-            <div style="display: flex; gap: 8px;">
-                <button class="wireframe-btn" id="btnSnipZoomIn" title="Vergrößern"><i class="fas fa-search-plus"></i></button>
-                <button class="wireframe-btn" id="btnSnipZoomOut" title="Verkleinern"><i class="fas fa-search-minus"></i></button>
+        <!-- Compass -->
+        <div class="map-compass" id="mapCompass">
+            <div class="compass-needle"></div>
+            <span class="compass-n">N</span>
+            <span class="compass-s">S</span>
+            <span class="compass-e">O</span>
+            <span class="compass-w">W</span>
+        </div>
+
+        <!-- Map Sidebar -->
+        <aside class="map-sidebar">
+            <div class="sidebar-header">
+                <h3>Karten-Steuerung</h3>
+                <button class="btn-icon" id="btnCloseMap"><i class="fas fa-times"></i></button>
             </div>
-            
-            <div style="flex: 1; display: flex; gap: 12px; align-items: center;">
-                <select id="snipTargetRow" class="wireframe-select" style="flex: 2; height: 32px;"></select>
-                <div style="display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.3); padding: 2px 10px; border-radius: 4px; border: 1px solid rgba(0,242,255,0.2);">
-                    <div id="snipColorIndicator" style="width: 18px; height: 18px; border-radius: 3px; background: #ff00ff; border: 1px solid #fff;"></div>
-                    <select id="snipTargetType" class="wireframe-select" style="border: none; background: transparent;">
-                        <option value="Anhang_0.8">0.8m</option>
-                        <option value="Anhang_1.6">1.6m</option>
-                        <option value="Anhang_3.2">3.2m</option>
-                        <option value="Anhang_Global">Ges. Anhang</option>
-                    </select>
+
+            <div class="sidebar-section">
+                <label class="section-label">Kartentyp</label>
+                <div class="btn-row">
+                    <button class="sidebar-btn active" id="btnMapStandard">Standard</button>
+                    <button class="sidebar-btn" id="btnMapSatellite">Satellit HD</button>
+                </div>
+                <button class="sidebar-btn full" id="btnUploadPlan"><i class="fas fa-file-image"></i> Eigene Karte laden</button>
+                <input type="file" id="inputPlanImage" hidden accept="image/*">
+            </div>
+
+            <div class="sidebar-section">
+                <label class="section-label">GPS & Navigation</label>
+                <input type="text" id="inpMapSearch" class="sidebar-input" placeholder="Adresse oder Lat, Lng...">
+                <button class="sidebar-btn full" id="btnGoToLocation"><i class="fas fa-search"></i> Standort suchen</button>
+                <div class="btn-row">
+                    <button class="sidebar-btn" id="btnLocateMe"><i class="fas fa-location-arrow"></i> GPS</button>
+                    <button class="sidebar-btn" id="btnSetStartPoint"><i class="fas fa-flag-checkered"></i> Start</button>
+                </div>
+                <button class="sidebar-btn full" id="btnShowMeasureLine" style="margin-top:6px;border-color:#10b981;color:#10b981;"><i class="fas fa-ruler"></i> Messlinie anzeigen</button>
+            </div>
+
+            <div class="sidebar-section">
+                <label class="section-label">Marker</label>
+                <div class="btn-row thirds">
+                    <button class="sidebar-btn depth-08" id="btnMarker08"><i class="fas fa-map-marker-alt"></i> 0.8m</button>
+                    <button class="sidebar-btn depth-16" id="btnMarker16"><i class="fas fa-map-marker-alt"></i> 1.6m</button>
+                    <button class="sidebar-btn depth-32" id="btnMarker32"><i class="fas fa-map-marker-alt"></i> 3.2m</button>
                 </div>
             </div>
-            <div style="display: flex; gap: 10px; align-items: center; border-left: 1px solid rgba(0,242,255,0.3); padding-left: 15px;">
-                <input type="color" id="snipTextColor" value="#ff0000" style="width: 32px; height: 32px; border: 1px solid var(--accent-primary); background: #000; cursor: pointer; padding: 2px;">
-                <button class="wireframe-btn" id="btnSnipText" style="display: flex; align-items: center; gap: 8px;"><i class="fas fa-font"></i> <span>TEXT</span></button>
+
+            <div class="sidebar-section">
+                <label class="section-label">Linien</label>
+                <div class="btn-row thirds">
+                    <button class="sidebar-btn depth-08" id="btnLine08"><i class="fas fa-grip-lines"></i> 0.8m</button>
+                    <button class="sidebar-btn depth-16" id="btnLine16"><i class="fas fa-grip-lines"></i> 1.6m</button>
+                    <button class="sidebar-btn depth-32" id="btnLine32"><i class="fas fa-grip-lines"></i> 3.2m</button>
+                </div>
             </div>
+
+            <div class="sidebar-section">
+                <label class="section-label">Sichtbarkeit</label>
+                <div class="btn-row thirds">
+                    <button class="sidebar-btn depth-08" id="btnToggle08"><i class="fas fa-eye"></i> 0.8m</button>
+                    <button class="sidebar-btn depth-16" id="btnToggle16"><i class="fas fa-eye"></i> 1.6m</button>
+                    <button class="sidebar-btn depth-32" id="btnToggle32"><i class="fas fa-eye"></i> 3.2m</button>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <label class="section-label">Nummerierung</label>
+                <div class="num-grid">
+                    <button class="num-btn" data-num="1">1</button>
+                    <button class="num-btn" data-num="2">2</button>
+                    <button class="num-btn" data-num="3">3</button>
+                    <button class="num-btn" data-num="4">4</button>
+                    <button class="num-btn" data-num="5">5</button>
+                    <button class="num-btn" data-num="6">6</button>
+                    <button class="num-btn" data-num="7">7</button>
+                    <button class="num-btn" data-num="8">8</button>
+                    <button class="num-btn" data-num="9">9</button>
+                    <button class="num-btn" data-num="10">10</button>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <label class="section-label">Ausschnitt</label>
+                <div class="btn-row thirds">
+                    <button class="sidebar-btn" id="btnSnipRect"><i class="fas fa-vector-square"></i></button>
+                    <button class="sidebar-btn" id="btnSnipCircle"><i class="far fa-circle"></i></button>
+                    <button class="sidebar-btn" id="btnSnipPoly"><i class="fas fa-draw-polygon"></i></button>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="btn-row">
+                    <button class="sidebar-btn danger" id="btnClearShapes"><i class="fas fa-eraser"></i> Löschen</button>
+                    <button class="sidebar-btn" id="btnStopAudit"><i class="fas fa-mouse-pointer"></i> Stopp</button>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Column Manager Modal -->
+    <div class="modal-overlay" id="colManagerModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-columns"></i> Spalten verwalten</h3>
+                <button class="btn-icon" id="btnCloseColManager"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="colManagerGrid" class="col-grid"></div>
         </div>
-        <div class="wireframe-body" style="background: #000; padding: 20px; min-height: 400px; display: flex; align-items: center; justify-content: center; position: relative; overflow: auto;">
-            <canvas id="snipEditorCanvas" style="background: transparent; box-shadow: 0 0 30px rgba(0,0,0,0.8); border: 1px solid #333;"></canvas>
+    </div>
+
+    <!-- Projects Modal -->
+    <div class="modal-overlay" id="standortModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-folder-open"></i> Projekte</h3>
+                <button class="btn-icon" id="btnCloseStandortModal"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="standortGrid" class="project-grid"></div>
         </div>
-        <div class="wireframe-footer" style="padding: 20px 25px; background: rgba(0,0,0,0.3); border-top: 1px solid rgba(0,242,255,0.1); display: flex; justify-content: space-between; align-items: center;">
-            <button class="btn-modern" id="btnDiscardSnip" style="background: rgba(255,255,255,0.05); color: #888; border-color: #444;">ABBRECHEN</button>
-            <div style="display: flex; gap: 15px;">
-                <button class="btn-modern" id="btnSnipRetry" style="background: rgba(239, 68, 68, 0.1); color: var(--accent-danger); border-color: var(--accent-danger);"><i class="fas fa-undo"></i> WIEDERHOLEN</button>
-                <button class="btn-modern btn-success" id="btnSaveSnip" style="padding: 10px 25px;"><i class="fas fa-check-circle"></i> ANHANG SPEICHERN</button>
+    </div>
+
+    <!-- Export Modal -->
+    <div class="modal-overlay" id="exportModal">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h3><i class="fas fa-file-excel"></i> Excel Export</h3>
+                <button class="btn-icon" onclick="document.getElementById('exportModal').style.display='none'"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="modal-desc">Messtiefen für den Export auswählen:</p>
+            <div class="export-options">
+                <label class="export-option depth-08-bg">
+                    <input type="checkbox" id="exportChk08" checked>
+                    <span class="depth-dot" style="background:#ff00ff;"></span>
+                    <span>0.8 m</span>
+                </label>
+                <label class="export-option depth-16-bg">
+                    <input type="checkbox" id="exportChk16" checked>
+                    <span class="depth-dot" style="background:#ffff00;"></span>
+                    <span>1.6 m</span>
+                </label>
+                <label class="export-option depth-32-bg">
+                    <input type="checkbox" id="exportChk32" checked>
+                    <span class="depth-dot" style="background:#00ffff;"></span>
+                    <span>3.2 m</span>
+                </label>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="document.getElementById('exportModal').style.display='none'">Abbrechen</button>
+                <button class="btn-primary" onclick="confirmExportDepths()"><i class="fas fa-download"></i> Exportieren</button>
             </div>
         </div>
     </div>
 
-    <div id="toast" class="toast"><span id="toastMessage"></span></div>
-    <div id="loadingOverlay"
-        style="position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.8); z-index: 20000; display: none; justify-content: center; align-items: center; color: white;">
-        <div style="text-align: center;">
-            <i class="fas fa-circle-notch fa-spin" style="font-size: 48px; margin-bottom: 20px;"></i>
-            <h3>Verarbeitung...</h3>
+    <!-- Snipping Editor -->
+    <div id="snipConfirmModal" class="modal-overlay" style="display:none;">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3><i class="fas fa-crop-alt"></i> Ausschnitt bearbeiten</h3>
+                <div class="snip-controls">
+                    <button class="toolbar-btn" id="btnSnipZoomIn"><i class="fas fa-search-plus"></i></button>
+                    <button class="toolbar-btn" id="btnSnipZoomOut"><i class="fas fa-search-minus"></i></button>
+                </div>
+            </div>
+            <div class="snip-editor">
+                <canvas id="snipEditorCanvas"></canvas>
+            </div>
+            <div class="snip-options">
+                <select id="snipTargetRow" class="sidebar-input"></select>
+                <select id="snipTargetType" class="sidebar-input">
+                    <option value="Anhang_0.8">0.8m</option>
+                    <option value="Anhang_1.6">1.6m</option>
+                    <option value="Anhang_3.2">3.2m</option>
+                    <option value="Anhang_Global">Gesamt</option>
+                </select>
+                <div id="snipColorIndicator" class="snip-color-dot" style="background:#ff00ff;"></div>
+                <input type="color" id="snipTextColor" value="#ffffff" class="color-input">
+                <button class="toolbar-btn" id="btnSnipText"><i class="fas fa-font"></i></button>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-secondary" id="btnSnipRetry"><i class="fas fa-redo"></i> Neu</button>
+                <button class="btn-secondary" id="btnDiscardSnip">Verwerfen</button>
+                <button class="btn-secondary" id="btnSnipDownload"><i class="fas fa-download"></i></button>
+                <button class="btn-primary" id="btnSaveSnip"><i class="fas fa-save"></i> Speichern</button>
+            </div>
         </div>
     </div>
 
-    <input type="file" id="fileInput" hidden accept=".xlsx,.xls,.csv">
-    <input type="file" id="anhangInput" hidden accept="image/*">
+    <!-- Depth Confirmation Dialog -->
+    <div id="depthConfirmModal" class="modal-overlay" style="display:none;">
+        <div class="modal-content modal-sm" style="text-align:center;">
+            <div style="margin-bottom:20px;">
+                <div id="depthConfirmIcon" style="width:60px;height:60px;border-radius:50%;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;font-size:24px;"></div>
+                <h3 id="depthConfirmTitle" style="margin-bottom:8px;"></h3>
+                <p id="depthConfirmText" style="color:var(--text-secondary);font-size:13px;line-height:1.5;"></p>
+            </div>
+            <label style="display:flex;align-items:center;gap:10px;padding:14px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:16px;cursor:pointer;font-size:13px;">
+                <input type="checkbox" id="depthConfirmCheck" style="width:18px;height:18px;accent-color:var(--success);">
+                <span>Elektrodenabstand korrekt aufgebaut</span>
+            </label>
+            <div class="modal-actions" style="border:none;padding:0;margin:0;">
+                <button class="btn-secondary" id="depthConfirmCancel">Abbrechen</button>
+                <button class="btn-primary" id="depthConfirmOk" disabled><i class="fas fa-check"></i> Bestätigen & Platzieren</button>
+            </div>
+        </div>
+    </div>
 
-    <script>
-        // Force unregister old service workers if needed
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(regs => {
-                for(let reg of regs) reg.unregister();
-            });
-        }
-        // Force clear old caches
-        if ('caches' in window) {
-            caches.keys().then(names => {
-                for (let name of names) caches.delete(name);
-            });
-        }
-    </script>
-    <script src="app_v57.js?v=201"></script>
+    <!-- Toast Container -->
+    <div id="toastContainer"></div>
+
+    <script src="formatting.js"></script>
+    <script src="app.js"></script>
 </body>
-
 </html>

@@ -1,17 +1,19 @@
 {
-  "name": "Bodenwiderstandsmessung-GUI",
-  "short_name": "Bodenwiderstand",
-  "start_url": ".",
+  "name": "Messstellen Manager Pro",
+  "short_name": "Messstellen",
+  "description": "Professionelle Bodenwiderstandsmessung - Feldmessung & Dokumentation",
+  "start_url": "./index.html",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#0f172a",
   "theme_color": "#3b82f6",
-  "description": "High-performance field auditing and soil resistance management.",
   "icons": [
     {
       "src": "app-icon.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "any maskable"
     }
-  ]
+  ],
+  "categories": ["productivity", "utilities"]
 }

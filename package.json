@@ -1,0 +1,19 @@
+{
+  "name": "messstellen-manager",
+  "version": "6.0.0",
+  "description": "Professionelle Bodenwiderstandsmessung - Feldmessung & Dokumentation",
+  "scripts": {
+    "dev": "npx serve . -p 3000 -s",
+    "start": "npx serve . -p 8080 -s"
+  },
+  "keywords": [
+    "bodenwiderstand",
+    "messstellen",
+    "pwa"
+  ],
+  "author": "NRW-IDB",
+  "license": "PROPRIETARY",
+  "devDependencies": {
+    "serve": "^14.2.6"
+  }
+}
