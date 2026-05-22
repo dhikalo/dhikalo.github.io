@@ -1,39 +1,61 @@
-# Bodenwiderstandsmessung GUI
+# Messstellen Manager Pro v6.0
 
-*Sichtbar*
-- Alle Spalten werden automatisch ausgewählt
-- Bodenwiderstand wird grün hervorgehoben
-- Keine manuelle Auswahl nötig
+Professional field measurement tool for soil resistance (Bodenwiderstandsmessung).
 
-*Design*
-- Font Awesome Icons (premium)
-- Inter Font (modern & professional)
-- Clean & minimalist
-- Business-ready
+## Features
 
-*Funktionen*
-- Excel/CSV Import
-- Vollständige Formatierung (Farben, Ausrichtung, Text)
-- GPS Karte mit echten Koordinaten
-- Auto-Save
-- Excel Export
+- **Data Table** — Full measurement grid with live ρ/MW/SD calculations
+- **Interactive Map** — GPS tracking, markers, lines, numbered pins, offline plans
+- **Excel Export** — Professional reports with images and statistics
+- **Offline PWA** — Works without internet, auto-caches all assets
+- **Undo/Redo** — Full history stack for data changes
+- **Multi-Project** — Save and switch between measurement sites
 
-*Verwendung*
-1. Öffnen: Doppelklick auf `index.html`
-2. Datei hochladen: Excel-Datei auswählen
-3. Spalten prüfen: ALLE sind bereits ausgewählt (inkl. Bodenwiderstand!)
-4. Daten laden" klicken
-5. Fertig
+## Quick Start
 
-*Dateien*
+1. Open `index.html` in any modern browser
+2. Choose "Datei öffnen" (import Excel) or "Neues Projekt"
+3. Start measuring
+
+## Tech Stack
+
+- Pure HTML/CSS/JS (no build tools needed)
+- Leaflet for maps
+- ExcelJS + SheetJS for Excel I/O
+- html2canvas for map screenshots
+- Service Worker for offline capability
+
+## File Structure
+
+```
 messstellen-manager/
-├── index.html  ← Öffnen Sie diese Datei
-├── styles.css  ← Professional Design
-├── app.js      ← Logik (Bodenwiderstand garantiert!)
-└── README.md   ← Diese Datei
+├── index.html       ← Main entry point
+├── app.js           ← Application logic (v6.0)
+├── formatting.js    ← Cell formatting module
+├── styles.css       ← Professional design system
+├── sw.js            ← Service worker (offline)
+├── manifest.json    ← PWA manifest
+├── app-icon.png     ← App icon
+└── idb_logo.jpg     ← Company logo
+```
 
-*Wichtig*
+## What's New in v6.0
 
-- Browser Cache löschen: Drücken Sie `Ctrl+F5` beim ersten Öffnen
-- Bodenwiderstand: Wird AUTOMATISCH ausgewählt und grün markiert
+- Complete rewrite — zero known bugs
+- Professional, clean UI design (sell-ready)
+- Proper undo/redo implementation
+- Fixed formatting module (was broken in v5.x)
+- Touch-optimized for tablets (44px touch targets)
+- Better GPS error handling
+- Improved offline caching strategy
+- Cleaner code structure for maintainability
 
+## Browser Support
+
+- Chrome/Edge 90+
+- Safari 15+ (iOS/macOS)
+- Firefox 90+
+
+---
+
+NRW-IDB | Messtechnik & Bauservice
