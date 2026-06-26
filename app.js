@@ -5593,7 +5593,7 @@ function startRowVoiceDictation(rowIdx, micBtn) {
 
     try {
         _voiceRecognition.start();
-        showToast('🎤 Zeile ' + (rowIdx + 1) + ' — Werte nacheinander sprechen');
+        // Visual toast notification removed as requested - red microphone button color indicates active status
     } catch (e) {
         showToast('Mikrofon-Fehler');
         _voiceActive = false;
