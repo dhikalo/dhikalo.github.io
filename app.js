@@ -1285,7 +1285,7 @@ function renderTableBody() {
                         inp.style.background = 'rgba(210, 180, 140, 0.35)';
                     }
 
-                    inp.onfocus = () => { AppState.selectedCell = `${idx}-${col}`; };
+                    inp.onfocus = () => { AppState.selectedCell = `${idx}-${col}`; syncMapWithTable(); };
                     inp.oninput = (e) => {
                         originalRow[col] = e.target.value;
                         updateLiveCalculations(originalRow, col, tr);
@@ -1320,7 +1320,15 @@ function syncMapWithTable() {
     }
     layers.tableMarkers.clearLayers();
 
+    let activeRowIdx = -1;
+    if (AppState.selectedCell) {
+        activeRowIdx = parseInt(AppState.selectedCell.split('-')[0]);
+    } else if (AppState.data && AppState.data.length > 0) {
+        activeRowIdx = AppState.data.length - 1;
+    }
+
     AppState.data.forEach((row, idx) => {
+        if (idx === activeRowIdx) return; // Skip drawing blue dot for active row to avoid duplicates
         let lat = null, lng = null;
         if (row['Koordinaten']) {
             const coordStr = String(row['Koordinaten']);
