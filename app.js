@@ -1626,7 +1626,7 @@ function toggleMapSidebar() {
     if (!sidebar) return;
     const isCollapsed = sidebar.classList.toggle('collapsed');
     if (btn) {
-        btn.querySelector('i').className = isCollapsed ? 'fas fa-chevron-left' : 'fas fa-chevron-right';
+        btn.querySelector('i').className = isCollapsed ? 'fas fa-chevron-down' : 'fas fa-chevron-up';
     }
     // Let Leaflet recalculate size after animation
     setTimeout(() => { if (map) map.invalidateSize(); }, 320);
@@ -1760,9 +1760,9 @@ function createPinMarker(latlng, color, customText) {
     
     var textToShow = customText !== undefined ? customText : count;
 
-    const xSvg = `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M4 4L14 14M14 4L4 14" stroke="black" stroke-width="3.5" stroke-linecap="round"/>
-        <path d="M4 4L14 14M14 4L4 14" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
+    const dotSvg = `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="9" cy="9" r="7.5" fill="white" stroke="black" stroke-width="1.5"/>
+        <circle cx="9" cy="9" r="4.5" fill="${color}"/>
     </svg>`;
     return L.marker(latlng, {
         draggable: true,
@@ -1771,7 +1771,7 @@ function createPinMarker(latlng, color, customText) {
         markerColor: color,
         icon: L.divIcon({
             html: `<div style="display:flex; flex-direction:column; align-items:center; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));">
-                       <div style="width:18px;height:18px;">${xSvg}</div>
+                       <div style="width:18px;height:18px;">${dotSvg}</div>
                        <div style="background:rgba(255,255,255,0.9); color:${color}; font-size:9px; font-weight:bold; padding:0 3px; border-radius:3px; margin-top:1px;">${textToShow}</div>
                    </div>`,
             iconSize: [24, 34], iconAnchor: [12, 18], className: 'custom-marker-icon'
@@ -2071,10 +2071,10 @@ function handleLocationFound(e) {
     if (AppState.autoGPS && acc <= 20 && AppState.data && AppState.data.length > 0) {
         const emptyIdx = AppState.data.findIndex(row => !row['Koordinaten'] && !row['GPS-Lat']);
         if (emptyIdx >= 0) {
-            const dmsVal = convertToDMS(avgLat, true) + ' ' + convertToDMS(avgLng, false);
+            const dmsVal = convertToDMS(latlng.lat, true) + ' ' + convertToDMS(latlng.lng, false);
             AppState.data[emptyIdx]['Koordinaten'] = dmsVal;
-            AppState.data[emptyIdx]['GPS-Lat'] = avgLat.toFixed(5);
-            AppState.data[emptyIdx]['GPS-Lng'] = avgLng.toFixed(5);
+            AppState.data[emptyIdx]['GPS-Lat'] = latlng.lat.toFixed(5);
+            AppState.data[emptyIdx]['GPS-Lng'] = latlng.lng.toFixed(5);
             AppState.hiddenColumns.delete('special');
             renderTable();
             saveToStorage();
@@ -2392,7 +2392,7 @@ function handleStickyMarkerClick(e) {
         var outermostDist = requiredDist * 3;
         var circle = L.circle(centerLatLng, {
             radius: outermostDist,
-            color: color, weight: 6, fillOpacity: 0, dashArray: '8, 8'
+            color: color, weight: 3, fillOpacity: 0, dashArray: '8, 8'
         });
         groupLayer.addLayer(circle);
 
@@ -2409,24 +2409,25 @@ function handleStickyMarkerClick(e) {
                 var pointLatLng = destPoint(centerLatLng, bearingRad, currentDist);
                 markers.push(pointLatLng);
                 
-                var xMarker = L.marker(pointLatLng, {
-                    interactive: false,
-                    icon: L.divIcon({
-                        html: `<div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;">
-                                   <svg width="14" height="14" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                       <path d="M4 4L14 14M14 4L4 14" stroke="black" stroke-width="3.5" stroke-linecap="round"/>
-                                       <path d="M4 4L14 14M14 4L4 14" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
-                                   </svg>
-                               </div>`,
-                        iconSize: [24, 24], iconAnchor: [12, 12], className: 'x-marker'
-                    })
-                });
-                groupLayer.addLayer(xMarker);
+                // Electrode marker '✕' commented out as requested
+                // var xMarker = L.marker(pointLatLng, {
+                //     interactive: false,
+                //     icon: L.divIcon({
+                //         html: `<div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;">
+                //                    <svg width="14" height="14" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                //                        <path d="M4 4L14 14M14 4L4 14" stroke="black" stroke-width="3.5" stroke-linecap="round"/>
+                //                        <path d="M4 4L14 14M14 4L4 14" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
+                //                    </svg>
+                //                </div>`,
+                //         iconSize: [24, 24], iconAnchor: [12, 12], className: 'x-marker'
+                //     })
+                // });
+                // groupLayer.addLayer(xMarker);
             }
 
             // Garis lurus putus-putus
             var line = L.polyline([centerLatLng, endLatLng], {
-                color: color, weight: 6, opacity: 1.0, dashArray: '8, 8'
+                color: color, weight: 3, opacity: 1.0, dashArray: '8, 8'
             });
             groupLayer.addLayer(line);
 
@@ -2711,7 +2712,7 @@ function restoreMapDrawings() {
 
             // Dashed outer circle
             var circle = L.circle(centerLatLng, {
-                radius: outermostDist, color: color, weight: 6, fillOpacity: 0, dashArray: '8, 8'
+                radius: outermostDist, color: color, weight: 3, fillOpacity: 0, dashArray: '8, 8'
             });
             groupLayer.addLayer(circle);
 
@@ -2724,19 +2725,6 @@ function restoreMapDrawings() {
                     var currentDist = requiredDist * (j + 1);
                     var pointLatLng = destPoint(centerLatLng, bearingRad, currentDist);
                     AppState.depthMarkers[depthKey].push(pointLatLng);
-                    var xMarker = L.marker(pointLatLng, {
-                        interactive: false,
-                        icon: L.divIcon({
-                            html: `<div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;">
-                                       <svg width="14" height="14" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                           <path d="M4 4L14 14M14 4L4 14" stroke="black" stroke-width="3.5" stroke-linecap="round"/>
-                                           <path d="M4 4L14 14M14 4L4 14" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
-                                       </svg>
-                                   </div>`,
-                            iconSize: [24, 24], iconAnchor: [12, 12], className: 'x-marker'
-                        })
-                    });
-                    groupLayer.addLayer(xMarker);
                 }
 
                 var line = L.polyline([centerLatLng, endLatLng], {

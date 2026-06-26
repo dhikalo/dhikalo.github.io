@@ -760,52 +760,56 @@ body {
 }
 
 .map-sidebar {
-    width: 300px;
-    min-width: 300px;
-    height: 100%;
-    max-height: 100%;
+    width: 100%;
+    min-width: 100%;
+    height: auto;
+    max-height: none;
     background: var(--bg-secondary);
-    border-left: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    border-left: none;
     display: flex;
-    flex-direction: column;
-    overflow-x: hidden;
-    overflow-y: auto;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
     z-index: 100001;
     flex-shrink: 0;
-    order: 1;
-    transition: min-width 0.3s ease, width 0.3s ease;
+    order: -1; /* Render at the top of the map */
+    transition: height 0.3s ease;
+    -webkit-overflow-scrolling: touch;
 }
 
 .map-sidebar.collapsed {
-    width: 48px;
-    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
     overflow: hidden;
 }
 
 .map-sidebar.collapsed .sidebar-section,
 .map-sidebar.collapsed .sidebar-header h3 {
-    display: none;
+    display: none !important;
 }
 
 .map-sidebar.collapsed .sidebar-header {
-    flex-direction: column;
-    justify-content: flex-start;
-    padding: 12px 6px;
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 10px 14px;
     gap: 8px;
 }
 
 .map-layout.show {
-    flex-direction: row;
+    flex-direction: column;
 }
 
 .sidebar-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border);
+    padding: 10px 14px;
+    border-bottom: none;
+    border-right: 1px solid var(--border);
     flex-shrink: 0;
     gap: 8px;
+    min-width: 160px;
 }
 
 .sidebar-header h3 {
@@ -818,13 +822,13 @@ body {
 }
 
 .sidebar-section {
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border-light);
+    padding: 10px 14px;
+    border-bottom: none;
+    border-right: 1px solid var(--border-light);
     display: flex;
     flex-direction: column;
     gap: 8px;
-    flex-shrink: 0;
-    width: 100%;
+    flex: 1 1 220px;
 }
 
 .section-label {
@@ -1359,11 +1363,6 @@ body {
     .modal-content.modal-lg {
         width: 760px;
     }
-
-    .map-sidebar {
-        width: 260px;
-        min-width: 260px;
-    }
 }
 
 /* ── iPad Portrait / iPad Mini Portrait (744px–1024px) ── */
@@ -1421,47 +1420,6 @@ body {
     .modal-content.modal-lg {
         width: 95vw;
         max-width: 700px;
-    }
-
-    /* On portrait tablets, sidebar moves to bottom */
-    .map-sidebar {
-        width: 100%;
-        min-width: 100%;
-        height: auto;
-        max-height: 220px;
-        flex-direction: row;
-        overflow-x: auto;
-        overflow-y: hidden;
-        border-left: none;
-        border-top: 1px solid var(--border);
-        order: 1;
-    }
-
-    .map-layout.show {
-        flex-direction: column;
-    }
-
-    .sidebar-header {
-        flex-direction: column;
-        border-bottom: none;
-        border-right: 1px solid var(--border);
-        min-width: 100px;
-        padding: 10px 8px;
-    }
-
-    .sidebar-section {
-        width: 240px;
-        flex-shrink: 0;
-        border-bottom: none;
-        border-right: 1px solid var(--border-light);
-        padding: 10px 12px;
-    }
-
-    .map-sidebar.collapsed {
-        height: 48px;
-        min-width: 100%;
-        width: 100%;
-        overflow: hidden;
     }
 
     /* Welcome screen scaled up */
