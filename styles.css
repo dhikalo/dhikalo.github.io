@@ -2870,8 +2870,8 @@ body {
     color: #ef4444 !important;
 }
 
-/* ─── LANDSCAPE MEDIA QUERY (iPad, Tablet, Desktop) ─── */
-@media (orientation: landscape) {
+/* ─── LANDSCAPE MEDIA QUERY (iPad, Tablet, Touch screens) ─── */
+@media (pointer: coarse) and (orientation: landscape) {
     .map-layout.show {
         flex-direction: row !important;
     }
@@ -2886,6 +2886,7 @@ body {
         overflow-x: hidden !important;
         border-bottom: none !important;
         border-left: 1px solid var(--border) !important;
+        order: 1 !important; /* Move to the right side of the map */
     }
 
     .map-sidebar.collapsed {

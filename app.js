@@ -1706,6 +1706,11 @@ if (USE_OSM) {
     if (sidebar) {
         const obs = new ResizeObserver(() => { if (map) map.invalidateSize(); });
         obs.observe(sidebar);
+        
+        // Prevent Leaflet map from intercepting click, scroll, and drag/touch gestures on the sidebar
+        L.DomEvent.disableClickPropagation(sidebar);
+        L.DomEvent.disableScrollPropagation(sidebar);
+        L.DomEvent.on(sidebar, 'touchstart touchmove touchend contextmenu', L.DomEvent.stopPropagation);
     }
 
     // Draw events
@@ -2023,23 +2028,26 @@ function handleLocationFound(e) {
         AppState._lastStableLatLng = latlng;
     }
 
-    // Reuse existing marker instead of destroy+recreate (smoother)
+    // Use a clean dark gray dot for the user's location
+    const userIcon = L.divIcon({
+        html: `<div style="background:#334155;width:16px;height:16px;border-radius:50%;border:2px solid #ffffff;box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>`,
+        iconSize: [16, 16], iconAnchor: [8, 8], className: 'user-icon'
+    });
+
     if (AppState.userMarker) {
         AppState.userMarker.setLatLng(latlng);
+        AppState.userMarker.setIcon(userIcon); // Dynamically update icon style if it was created before
     } else {
-        const userIcon = L.divIcon({
-            html: `<div style="background:var(--accent,#3b82f6);width:28px;height:28px;border-radius:50%;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;"><i class="fas fa-user" style="color:white;font-size:12px;"></i></div>`,
-            iconSize: [28, 28], iconAnchor: [14, 14], className: 'user-icon'
-        });
         AppState.userMarker = L.marker(latlng, { icon: userIcon, zIndexOffset: 2000 }).addTo(map);
     }
 
+    // Subtle dashed gray circle for accuracy to prevent it from looking like a blue dot
     if (AppState.accuracyCircle) {
         AppState.accuracyCircle.setLatLng(latlng);
         AppState.accuracyCircle.setRadius(effectiveAcc);
     } else {
         AppState.accuracyCircle = L.circle(latlng, effectiveAcc, {
-            color: '#3b82f6', fillColor: 'rgba(59,130,246,0.1)', weight: 1
+            color: '#64748b', fillColor: 'rgba(100,116,139,0.03)', weight: 1, dashArray: '4, 4'
         }).addTo(map);
     }
 
