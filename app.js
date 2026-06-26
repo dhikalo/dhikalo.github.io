@@ -1596,11 +1596,25 @@ function createEmptyRows(n) {
 
 
 // ─── MAP MODULE ───
+function updateOrientationClass() {
+    const layout = $('mapLayout');
+    if (!layout) return;
+    const isLandscape = window.innerWidth > window.innerHeight;
+    if (isLandscape) {
+        layout.classList.add('is-landscape');
+    } else {
+        layout.classList.remove('is-landscape');
+    }
+}
+window.addEventListener('resize', updateOrientationClass);
+window.addEventListener('orientationchange', updateOrientationClass);
+
 function openMap() {
     const m = $('mapLayout');
     if (m) {
         m.style.display = 'flex';
         m.classList.add('show');
+        updateOrientationClass();
         if (!map) initMap();
         // First invalidate after initial render
         setTimeout(() => {

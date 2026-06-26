@@ -2870,13 +2870,13 @@ body {
     color: #ef4444 !important;
 }
 
-/* ─── LANDSCAPE MEDIA QUERY (iPad, Tablet, Touch screens) ─── */
-@media (pointer: coarse) and (orientation: landscape) {
-    .map-layout.show {
+/* ─── LANDSCAPE TABLET ORIENTATION QUERY (iPad Touch Landscape) ─── */
+@media (pointer: coarse) {
+    .map-layout.show.is-landscape {
         flex-direction: row !important;
     }
 
-    .map-sidebar {
+    .map-layout.show.is-landscape .map-sidebar {
         width: 320px !important;
         min-width: 320px !important;
         height: 100% !important;
@@ -2889,7 +2889,7 @@ body {
         order: 1 !important; /* Move to the right side of the map */
     }
 
-    .map-sidebar.collapsed {
+    .map-layout.show.is-landscape .map-sidebar.collapsed {
         width: 48px !important;
         min-width: 48px !important;
         height: 100% !important;
@@ -2897,12 +2897,12 @@ body {
         overflow: hidden !important;
     }
 
-    .map-sidebar.collapsed .sidebar-section,
-    .map-sidebar.collapsed .sidebar-header h3 {
+    .map-layout.show.is-landscape .map-sidebar.collapsed .sidebar-section,
+    .map-layout.show.is-landscape .map-sidebar.collapsed .sidebar-header h3 {
         display: none !important;
     }
 
-    .sidebar-header {
+    .map-layout.show.is-landscape .sidebar-header {
         border-right: none !important;
         border-bottom: 1px solid var(--border) !important;
         flex-direction: row !important;
@@ -2912,7 +2912,7 @@ body {
         width: 100% !important;
     }
 
-    .map-sidebar.collapsed .sidebar-header {
+    .map-layout.show.is-landscape .map-sidebar.collapsed .sidebar-header {
         flex-direction: column !important;
         padding: 10px 0 !important;
         gap: 12px !important;
@@ -2921,7 +2921,7 @@ body {
         width: 100% !important;
     }
 
-    .sidebar-section {
+    .map-layout.show.is-landscape .sidebar-section {
         border-right: none !important;
         border-bottom: 1px solid var(--border-light) !important;
         flex: 0 0 auto !important;
@@ -2930,13 +2930,13 @@ body {
     }
 
     /* Smooth chevron rotation for horizontal collapse */
-    .map-sidebar #btnToggleSidebar i {
+    .map-layout.show.is-landscape .map-sidebar #btnToggleSidebar i {
         transform: rotate(90deg);
         transition: transform 0.3s ease;
     }
 
     /* Adjust scrollbar for vertical sidebar */
-    .map-sidebar::-webkit-scrollbar {
+    .map-layout.show.is-landscape .map-sidebar::-webkit-scrollbar {
         width: 6px;
         height: 0px;
     }
