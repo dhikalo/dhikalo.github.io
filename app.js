@@ -4599,7 +4599,7 @@ function initImageEditorCanvas(imgSrc) {
     img.onload = () => {
         let w = img.width;
         let h = img.height;
-        const maxDim = 4096;
+        const maxDim = 1280; // Compress high-res camera photos to 1280px to save storage
         if (w > maxDim || h > maxDim) {
             if (w > h) { h = Math.floor((h/w)*maxDim); w = maxDim; }
             else { w = Math.floor((w/h)*maxDim); h = maxDim; }
@@ -5078,7 +5078,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tCtx.fillRect(0, 0, canvas.width, canvas.height);
             tCtx.drawImage(canvas, 0, 0);
             
-            const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.98);
+            const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.80); // Compress quality to 80% to fit localStorage
             if (currentBilderRow > -1 && currentBilderCol) {
                 AppState.data[currentBilderRow][currentBilderCol] = dataUrl;
                 saveToStorage();
@@ -5115,7 +5115,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             
-            const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.98);
+            const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.85); // High quality for manual downloads
             const link = document.createElement('a');
             link.download = filename;
             link.href = dataUrl;

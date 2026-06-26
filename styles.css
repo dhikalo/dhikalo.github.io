@@ -778,6 +778,10 @@ body {
     -webkit-overflow-scrolling: touch;
 }
 
+.map-sidebar:not(.collapsed) {
+    min-height: 160px; /* Prevent vertical content clipping in Safari */
+}
+
 .map-sidebar.collapsed {
     height: 48px;
     min-height: 48px;
@@ -828,7 +832,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    flex: 1 1 220px;
+    flex: 1 0 240px; /* Prevent horizontal shrinking and clipping on iPad */
 }
 
 .section-label {
@@ -1529,6 +1533,10 @@ body {
 /* ─── TOUCH OPTIMIZATION (iPad + Tablet) ─── */
 @media (pointer: coarse) {
 
+    .map-sidebar:not(.collapsed) {
+        min-height: 200px; /* More height for touch targets */
+    }
+
     /* Minimum 48px touch targets — Apple HIG */
     .btn-icon {
         width: 48px;
@@ -1729,7 +1737,15 @@ body {
     }
 
     .map-layout {
-        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: 0;
+        padding-right: 0;
+    }
+
+    .map-sidebar {
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
     }
 
     .tab-bar {
@@ -1738,13 +1754,6 @@ body {
 
     .toolbar {
         padding-left: max(16px, env(safe-area-inset-left));
-    }
-
-    /* Map sidebar safe area on landscape iPad */
-    @media (orientation: landscape) {
-        .map-sidebar {
-            padding-right: env(safe-area-inset-right);
-        }
     }
 }
 
@@ -2859,4 +2868,75 @@ body {
 }
 .row-mic-btn.listening {
     color: #ef4444 !important;
+}
+
+/* ─── LANDSCAPE MEDIA QUERY (iPad, Tablet, Desktop) ─── */
+@media (orientation: landscape) {
+    .map-layout.show {
+        flex-direction: row !important;
+    }
+
+    .map-sidebar {
+        width: 320px !important;
+        min-width: 320px !important;
+        height: 100% !important;
+        min-height: 100% !important;
+        flex-direction: column !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        border-bottom: none !important;
+        border-left: 1px solid var(--border) !important;
+    }
+
+    .map-sidebar.collapsed {
+        width: 48px !important;
+        min-width: 48px !important;
+        height: 100% !important;
+        min-height: 100% !important;
+        overflow: hidden !important;
+    }
+
+    .map-sidebar.collapsed .sidebar-section,
+    .map-sidebar.collapsed .sidebar-header h3 {
+        display: none !important;
+    }
+
+    .sidebar-header {
+        border-right: none !important;
+        border-bottom: 1px solid var(--border) !important;
+        flex-direction: row !important;
+        justify-content: space-between !important;
+        padding: 14px 10px !important;
+        min-width: 0 !important;
+        width: 100% !important;
+    }
+
+    .map-sidebar.collapsed .sidebar-header {
+        flex-direction: column !important;
+        padding: 10px 0 !important;
+        gap: 12px !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        width: 100% !important;
+    }
+
+    .sidebar-section {
+        border-right: none !important;
+        border-bottom: 1px solid var(--border-light) !important;
+        flex: 0 0 auto !important;
+        width: 100% !important;
+        padding: 14px 12px !important;
+    }
+
+    /* Smooth chevron rotation for horizontal collapse */
+    .map-sidebar #btnToggleSidebar i {
+        transform: rotate(90deg);
+        transition: transform 0.3s ease;
+    }
+
+    /* Adjust scrollbar for vertical sidebar */
+    .map-sidebar::-webkit-scrollbar {
+        width: 6px;
+        height: 0px;
+    }
 }
