@@ -760,31 +760,29 @@ body {
 }
 
 .map-sidebar {
-    width: 100%;
-    min-width: 100%;
-    height: auto;
+    width: 320px;
+    min-width: 320px;
+    height: 100%;
+    min-height: 100%;
     max-height: none;
     background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
-    border-left: none;
+    border-left: 1px solid var(--border);
+    border-bottom: none;
     display: flex;
-    flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
     z-index: 100001;
     flex-shrink: 0;
-    order: -1; /* Render at the top of the map */
-    transition: height 0.3s ease;
+    order: 1; /* Render on the right side of the map by default */
+    transition: width 0.3s ease;
     -webkit-overflow-scrolling: touch;
 }
 
-.map-sidebar:not(.collapsed) {
-    min-height: 160px; /* Prevent vertical content clipping in Safari */
-}
-
 .map-sidebar.collapsed {
-    height: 48px;
-    min-height: 48px;
+    width: 48px;
+    min-width: 48px;
+    height: 100%;
     overflow: hidden;
 }
 
@@ -794,26 +792,28 @@ body {
 }
 
 .map-sidebar.collapsed .sidebar-header {
-    flex-direction: row;
-    justify-content: space-between;
-    padding: 10px 14px;
-    gap: 8px;
+    flex-direction: column;
+    padding: 10px 0;
+    gap: 12px;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
 }
 
 .map-layout.show {
-    flex-direction: column;
+    flex-direction: row; /* Align map left, sidebar right by default (portrait) */
 }
 
 .sidebar-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 14px;
-    border-bottom: none;
-    border-right: 1px solid var(--border);
+    padding: 14px 10px;
+    border-bottom: 1px solid var(--border);
+    border-right: none;
     flex-shrink: 0;
     gap: 8px;
-    min-width: 160px;
+    width: 100%;
 }
 
 .sidebar-header h3 {
@@ -826,13 +826,14 @@ body {
 }
 
 .sidebar-section {
-    padding: 10px 14px;
-    border-bottom: none;
-    border-right: 1px solid var(--border-light);
+    padding: 14px 12px;
+    border-bottom: 1px solid var(--border-light);
+    border-right: none;
     display: flex;
     flex-direction: column;
     gap: 8px;
-    flex: 1 0 240px; /* Prevent horizontal shrinking and clipping on iPad */
+    flex: 0 0 auto;
+    width: 100%;
 }
 
 .section-label {
@@ -1557,9 +1558,19 @@ body {
     }
 
     .sidebar-btn {
-        padding: 14px 14px;
-        min-height: 48px;
-        font-size: 14px;
+        padding: 8px 12px;
+        min-height: 36px;
+        font-size: 11px;
+    }
+
+    .sidebar-input {
+        padding: 8px 12px;
+        font-size: 11px;
+    }
+
+    .sidebar-section {
+        padding: 8px 10px;
+        gap: 6px;
     }
 
     .num-btn {
@@ -2870,4 +2881,77 @@ body {
     color: #ef4444 !important;
 }
 
-/* Dashboard always at the top for all devices and orientations */
+/* ─── LANDSCAPE MEDIA QUERY (Laptop, iPad Landscape) ─── */
+@media (orientation: landscape) {
+    .map-layout.show {
+        flex-direction: column !important; /* Stack vertically: dashboard top, map bottom */
+    }
+
+    .map-sidebar {
+        width: 100% !important;
+        min-width: 100% !important;
+        height: auto !important;
+        min-height: auto !important;
+        flex-direction: row !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        border-bottom: 1px solid var(--border) !important;
+        border-left: none !important;
+        order: -1 !important; /* Render at the top of the map */
+        transition: height 0.3s ease !important;
+    }
+
+    .map-sidebar:not(.collapsed) {
+        min-height: 160px !important; /* Normal horizontal height on laptop */
+    }
+
+    @media (pointer: coarse) {
+        .map-sidebar:not(.collapsed) {
+            min-height: 200px !important; /* Touch targets friendly height on iPad */
+        }
+    }
+
+    .map-sidebar.collapsed {
+        height: 48px !important;
+        min-height: 48px !important;
+        width: 100% !important;
+        min-width: 100% !important;
+        overflow: hidden !important;
+    }
+
+    .sidebar-header {
+        border-right: 1px solid var(--border) !important;
+        border-bottom: none !important;
+        flex-direction: row !important;
+        justify-content: space-between !important;
+        padding: 10px 14px !important;
+        width: auto !important;
+        min-width: 160px !important;
+    }
+
+    .map-sidebar.collapsed .sidebar-header {
+        flex-direction: row !important;
+        justify-content: space-between !important;
+        padding: 10px 14px !important;
+        width: auto !important;
+    }
+
+    .sidebar-section {
+        border-bottom: none !important;
+        border-right: 1px solid var(--border-light) !important;
+        flex: 1 0 240px !important; /* Horizontal columns don't squeeze below 240px */
+        width: auto !important;
+        padding: 10px 14px !important;
+    }
+
+    /* Rotate chevron to standard up/down for horizontal collapse */
+    .map-sidebar #btnToggleSidebar i {
+        transform: none !important;
+    }
+
+    /* Standard horizontal scrollbar */
+    .map-sidebar::-webkit-scrollbar {
+        width: 8px !important;
+        height: 8px !important;
+    }
+}
