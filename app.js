@@ -179,6 +179,54 @@ window.handleZoom = function(delta) {
     }
 };
 
+// Touch pinch-to-zoom for table wrapper
+(function() {
+    let initialDist = null;
+    let initialZoom = 100;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const wrapper = document.querySelector('.table-wrapper');
+        if (!wrapper) return;
+
+        wrapper.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                initialDist = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+                initialZoom = AppState.zoomLevel;
+            }
+        }, { passive: false });
+
+        wrapper.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2 && initialDist !== null) {
+                e.preventDefault();
+                const dist = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+                const factor = dist / initialDist;
+                let newZoom = Math.round((initialZoom * factor) / 5) * 5;
+                newZoom = Math.max(50, Math.min(200, newZoom));
+
+                if (newZoom !== AppState.zoomLevel) {
+                    AppState.zoomLevel = newZoom;
+                    const display = $('zoomLevelDisplay');
+                    if (display) display.textContent = newZoom + '%';
+                    wrapper.style.zoom = newZoom / 100;
+                }
+            }
+        }, { passive: false });
+
+        wrapper.addEventListener('touchend', (e) => {
+            if (e.touches.length < 2) {
+                initialDist = null;
+            }
+        });
+    });
+})();
+
 // ─── TAB SWITCHING ───
 function switchTab(tabName) {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -1704,7 +1752,10 @@ function createPinMarker(latlng, color, customText) {
     
     var textToShow = customText !== undefined ? customText : count;
 
-    const xSvg = `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="9" cy="9" r="8" fill="white" stroke="${color}" stroke-width="2"/><path d="M5.5 5.5L12.5 12.5M12.5 5.5L5.5 12.5" stroke="${color}" stroke-width="2" stroke-linecap="round"/></svg>`;
+    const xSvg = `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 4L14 14M14 4L4 14" stroke="black" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M4 4L14 14M14 4L4 14" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>`;
     return L.marker(latlng, {
         draggable: true,
         interactive: true,
@@ -2103,14 +2154,15 @@ function setStartPoint() {
     // Reset marker groups — new start = new group
     AppState.depthMarkers = { '0.8': [], '1.6': [], '3.2': [] };
 
-    if (AppState.startMarker) map.removeLayer(AppState.startMarker);
-    AppState.startMarker = L.marker(latlng, {
-        icon: L.divIcon({
-            html: '<div style="background:#ef4444;width:20px;height:20px;border-radius:50%;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4);"></div>',
-            iconSize: [20, 20], iconAnchor: [10, 10], className: 'start-marker'
-        }),
-        zIndexOffset: 3000
-    }).addTo(map);
+    // Commented out to hide the red start marker dot as requested
+    // if (AppState.startMarker) map.removeLayer(AppState.startMarker);
+    // AppState.startMarker = L.marker(latlng, {
+    //     icon: L.divIcon({
+    //         html: '<div style="background:#ef4444;width:20px;height:20px;border-radius:50%;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4);"></div>',
+    //         iconSize: [20, 20], iconAnchor: [10, 10], className: 'start-marker'
+    //     }),
+    //     zIndexOffset: 3000
+    // }).addTo(map);
     
     // Zoom to current position
     map.setView(latlng, 20, { animate: true });
@@ -2352,7 +2404,12 @@ function handleStickyMarkerClick(e) {
                 var xMarker = L.marker(pointLatLng, {
                     interactive: false,
                     icon: L.divIcon({
-                        html: `<div style="color:${color};font-size:24px;font-weight:900;line-height:24px;text-align:center;text-shadow:0px 0px 5px #000, 0px 0px 5px #000, 0px 0px 8px #000;">✕</div>`,
+                        html: `<div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;">
+                                   <svg width="14" height="14" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                       <path d="M4 4L14 14M14 4L4 14" stroke="black" stroke-width="3.5" stroke-linecap="round"/>
+                                       <path d="M4 4L14 14M14 4L4 14" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
+                                   </svg>
+                               </div>`,
                         iconSize: [24, 24], iconAnchor: [12, 12], className: 'x-marker'
                     })
                 });
@@ -2662,7 +2719,12 @@ function restoreMapDrawings() {
                     var xMarker = L.marker(pointLatLng, {
                         interactive: false,
                         icon: L.divIcon({
-                            html: `<div style="color:${color};font-size:24px;font-weight:900;line-height:24px;text-align:center;text-shadow:0px 0px 5px #000, 0px 0px 5px #000, 0px 0px 8px #000;">✕</div>`,
+                            html: `<div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;">
+                                       <svg width="14" height="14" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                           <path d="M4 4L14 14M14 4L4 14" stroke="black" stroke-width="3.5" stroke-linecap="round"/>
+                                           <path d="M4 4L14 14M14 4L4 14" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
+                                       </svg>
+                                   </div>`,
                             iconSize: [24, 24], iconAnchor: [12, 12], className: 'x-marker'
                         })
                     });
