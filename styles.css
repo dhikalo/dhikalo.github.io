@@ -2269,7 +2269,7 @@ body {
 /* ─── REVIEW DETAIL VIEW ─── */
 .review-detail-content {
     max-height: 45vh;
-    overflow-y: auto;
+    overflow: auto;
     margin-bottom: 16px;
     padding: 16px;
     background: var(--bg-primary);

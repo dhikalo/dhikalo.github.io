@@ -457,11 +457,11 @@ function applyRoleUI(role) {
 }
 
 // ─── PRÜFER WELCOME LIST ───
-let _prueferWelcomeFilter = 'submitted';
+let _prueferWelcomeFilter = 'all';
 let _prueferAllProjects = [];
 
 async function loadPrueferWelcomeList(filter) {
-    _prueferWelcomeFilter = filter || 'submitted';
+    _prueferWelcomeFilter = filter || 'all';
     const list = $('prueferProjectList');
     if (!list) return;
 
@@ -514,7 +514,7 @@ function renderPrueferWelcomeList() {
         const card = document.createElement('div');
         card.className = 'review-project-card';
         card.innerHTML = `
-            <div class="review-project-info">
+            <div class="review-project-info" style="flex: 1;">
                 <div class="review-project-name">${project.name || project.id}</div>
                 <div class="review-project-meta">
                     ${project.updatedBy ? `<span>${project.updatedBy}</span>` : ''}
@@ -522,11 +522,30 @@ function renderPrueferWelcomeList() {
                 </div>
                 ${project.reviewComment ? `<div style="font-size:11px;color:var(--danger);margin-top:3px;"><i class="fas fa-comment"></i> ${project.reviewComment}</div>` : ''}
             </div>
-            <span class="review-status-chip ${statusClasses[project.reviewStatus] || ''}">${statusLabels[project.reviewStatus] || '?'} ${project.reviewStatus || ''}</span>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span class="review-status-chip ${statusClasses[project.reviewStatus] || ''}">${statusLabels[project.reviewStatus] || '?'} ${project.reviewStatus || ''}</span>
+                <button class="btn-secondary delete-btn" style="color: white; background: var(--danger); border: none; padding: 6px 12px; font-size: 13px; border-radius: 6px;" title="Projekt löschen"><i class="fas fa-trash"></i> Löschen</button>
+            </div>
         `;
 
-        // Click → open project in main app for review
-        card.onclick = () => openProjectForReview(project);
+        const deleteBtn = card.querySelector('.delete-btn');
+        deleteBtn.onclick = async (e) => {
+            e.stopPropagation();
+            if (confirm(`Projekt "${project.name || project.id}" unwiderruflich aus der Cloud löschen?`)) {
+                if (typeof deleteFromCloud === 'function') {
+                    await deleteFromCloud(project.name || project.id);
+                    showToast('Projekt aus der Cloud gelöscht');
+                    loadPrueferWelcomeList(_prueferWelcomeFilter);
+                }
+            }
+        };
+
+        const infoArea = card.querySelector('.review-project-info');
+        const chipArea = card.querySelector('.review-status-chip');
+        const handleOpen = () => openProjectForReview(project);
+        infoArea.onclick = handleOpen;
+        chipArea.onclick = handleOpen;
+
         list.appendChild(card);
     });
 }
@@ -589,6 +608,7 @@ async function openProjectForReview(project) {
     if (mainApp) mainApp.style.display = 'flex';
 
     renderTable();
+    startProjectCloudSync(pName);
 
     // If submitted → open review detail immediately
     if (project.reviewStatus === 'submitted') {
@@ -724,6 +744,11 @@ function initUI() {
             loadPrueferWelcomeList(tab.dataset.pfilter);
         });
     });
+    
+    // Set 'Alle' as active tab on load
+    document.querySelectorAll('[data-pfilter]').forEach(t => t.classList.remove('active'));
+    const allTab = document.querySelector('[data-pfilter="all"]');
+    if (allTab) allTab.classList.add('active');
     on('btnPrueferRefresh', 'click', () => loadPrueferWelcomeList(_prueferWelcomeFilter));
 
     // Header buttons
@@ -747,6 +772,14 @@ function initUI() {
         const nameInput = $('projectName');
         if (nameInput) nameInput.value = '';
         renderTable();
+        startProjectCloudSync('');
+    });
+
+    on('projectName', 'change', (e) => {
+        startProjectCloudSync(e.target.value);
+    });
+    on('projectName', 'blur', (e) => {
+        startProjectCloudSync(e.target.value);
     });
     on('btnUndo', 'click', undo);
     on('btnRedo', 'click', redo);
@@ -1328,7 +1361,7 @@ function syncMapWithTable() {
     }
 
     AppState.data.forEach((row, idx) => {
-        if (idx === activeRowIdx) return; // Skip drawing blue dot for active row to avoid duplicates
+        // Draw blue dot for ALL rows (including active) so it can be dragged
         let lat = null, lng = null;
         if (row['Koordinaten']) {
             const coordStr = String(row['Koordinaten']);
@@ -1353,8 +1386,8 @@ function syncMapWithTable() {
                 interactive: true,
                 draggable: true,
                 icon: L.divIcon({
-                    html: `<div style="background:${color};width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>`,
-                    iconSize: [14, 14], iconAnchor: [7, 7], className: 'table-synced-marker'
+                    html: `<div style="background:${color};width:24px;height:24px;border-radius:50%;border:3px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,0.5);"></div>`,
+                    iconSize: [24, 24], iconAnchor: [12, 12], className: 'table-synced-marker'
                 })
             });
 
@@ -1727,6 +1760,32 @@ if (USE_OSM) {
         L.DomEvent.on(sidebar, 'touchstart touchmove touchend contextmenu', L.DomEvent.stopPropagation);
     }
 
+    // Context menu (long press / right click) to manually set active row location
+    map.on('contextmenu', function(e) {
+        if (!AppState.data || AppState.data.length === 0) return;
+        
+        let rowIdx = -1;
+        if (AppState.selectedCell) {
+            rowIdx = parseInt(AppState.selectedCell.split('-')[0]);
+        } else {
+            rowIdx = AppState.data.length - 1;
+        }
+
+        if (rowIdx >= 0 && rowIdx < AppState.data.length) {
+            const dmsVal = convertToDMS(e.latlng.lat, true) + ' ' + convertToDMS(e.latlng.lng, false);
+            AppState.data[rowIdx]['Koordinaten'] = dmsVal;
+            AppState.data[rowIdx]['GPS-Lat'] = e.latlng.lat.toFixed(5);
+            AppState.data[rowIdx]['GPS-Lng'] = e.latlng.lng.toFixed(5);
+            
+            debouncedSave(800);
+            setTimeout(() => {
+                renderTable();
+                if (typeof syncMapWithTable === 'function') syncMapWithTable();
+            }, 100);
+            showToast(`📍 Manuelle GPS für Zeile ${rowIdx + 1} gesetzt: ${dmsVal}`);
+        }
+    });
+
     // Draw events
     map.on(L.Draw.Event.CREATED, (e) => {
         const layer = e.layer;
@@ -2042,27 +2101,20 @@ function handleLocationFound(e) {
         AppState._lastStableLatLng = latlng;
     }
 
-    // Use a clean dark gray dot for the user's location
-    const userIcon = L.divIcon({
-        html: `<div style="background:#334155;width:16px;height:16px;border-radius:50%;border:2px solid #ffffff;box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>`,
-        iconSize: [16, 16], iconAnchor: [8, 8], className: 'user-icon'
-    });
-
+    // The user requested to hide the black tracking dot completely
     if (AppState.userMarker) {
         AppState.userMarker.setLatLng(latlng);
-        AppState.userMarker.setIcon(userIcon); // Dynamically update icon style if it was created before
     } else {
-        AppState.userMarker = L.marker(latlng, { icon: userIcon, zIndexOffset: 2000 }).addTo(map);
+        // Create marker object for getLatLng() calls, but DO NOT addTo(map)
+        const userIcon = L.divIcon({ className: 'hidden' });
+        AppState.userMarker = L.marker(latlng, { icon: userIcon, zIndexOffset: -1 });
     }
 
-    // Subtle dashed gray circle for accuracy to prevent it from looking like a blue dot
     if (AppState.accuracyCircle) {
         AppState.accuracyCircle.setLatLng(latlng);
         AppState.accuracyCircle.setRadius(effectiveAcc);
     } else {
-        AppState.accuracyCircle = L.circle(latlng, effectiveAcc, {
-            color: '#64748b', fillColor: 'rgba(100,116,139,0.03)', weight: 1, dashArray: '4, 4'
-        }).addTo(map);
+        AppState.accuracyCircle = L.circle(latlng, effectiveAcc, { color: 'transparent' });
     }
 
     if (!AppState.firstLocationFound) {
@@ -2297,6 +2349,25 @@ function setMarkerByDepth(color) {
     stopDrawing(true);
     if (!map) return;
     var depthLabel = color === '#e879f9' ? '0.8m' : (color === '#fbbf24' ? '1.6m' : '3.2m');
+    
+    // Auto-place star at active row coordinates if they exist
+    var rowIdx = -1;
+    if (AppState.selectedCell) rowIdx = parseInt(AppState.selectedCell.split('-')[0]);
+    else if (AppState.data && AppState.data.length > 0) rowIdx = AppState.data.length - 1;
+
+    if (rowIdx >= 0 && AppState.data[rowIdx] && AppState.data[rowIdx]['GPS-Lat'] && AppState.data[rowIdx]['GPS-Lng']) {
+        var lat = parseFloat(String(AppState.data[rowIdx]['GPS-Lat']).replace(',', '.'));
+        var lng = parseFloat(String(AppState.data[rowIdx]['GPS-Lng']).replace(',', '.'));
+        if (!isNaN(lat) && !isNaN(lng)) {
+            AppState.activeDrawToolName = 'sticky-marker';
+            AppState.activeColor = color;
+            AppState.activeDepthLabel = depthLabel;
+            handleStickyMarkerClick({ latlng: L.latLng(lat, lng) });
+            showToast(depthLabel + ' Marker automatisch gesetzt');
+            return;
+        }
+    }
+
     AppState.activeDrawToolName = 'sticky-marker';
     AppState.activeColor = color;
     AppState.activeDepthLabel = depthLabel;
@@ -3277,6 +3348,7 @@ function loadProject(name) {
         renderTable();
         if (map) restoreMapDrawings();
         showToast(`Projekt geladen: ${p.name}`);
+        startProjectCloudSync(p.name);
     }
 }
 
@@ -4693,24 +4765,17 @@ function redrawCanvas() {
             ctx.arc(ann.cx, ann.cy, ann.r, 0, 2 * Math.PI);
             ctx.stroke();
         } else if (ann.type === 'text') {
-            const fontSize = Math.round(20 * scale);
+            const fontSize = Math.round(40 * scale);
             ctx.font = `bold ${fontSize}px Inter, sans-serif`;
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'center';
             
-            const txtWidth = ctx.measureText(ann.text).width;
-            const padX = 6 * scale;
-            const boxH = 28 * scale;
-            const boxYOffset = 14 * scale;
-            
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
-            ctx.fillRect(ann.x - txtWidth/2 - padX, ann.y - boxYOffset, txtWidth + padX * 2, boxH);
-            ctx.strokeStyle = ann.color;
-            ctx.lineWidth = 1.5 * scale;
-            ctx.strokeRect(ann.x - txtWidth/2 - padX, ann.y - boxYOffset, txtWidth + padX * 2, boxH);
-            
-            ctx.fillStyle = '#ffffff';
+            // Draw text with the selected color and a slight shadow for contrast on photos
+            ctx.shadowColor = 'rgba(0,0,0,0.6)';
+            ctx.shadowBlur = 4 * scale;
+            ctx.fillStyle = ann.color;
             ctx.fillText(ann.text, ann.x, ann.y);
+            ctx.shadowBlur = 0; // reset shadow
         }
 
         // Draw handles for selection in move mode
@@ -4767,7 +4832,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Tools Setup
-    const tools = ['toolPencil', 'toolHighlighter', 'toolLine', 'toolCircle', 'toolText', 'toolMove', 'toolEraser'];
+    const tools = ['toolPencil', 'toolHighlighter', 'toolLine', 'toolCircle', 'toolText', 'toolMove'];
     tools.forEach(id => {
         const btn = $(id);
         if(btn) {
@@ -4786,12 +4851,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     on('toolDelete', 'click', () => {
         if (selectedAnnotation) {
-            imgAnnotations = imgAnnotations.filter(ann => ann !== selectedAnnotation);
-            selectedAnnotation = null;
-            redrawCanvas();
-            showToast('Element gelöscht');
+            if (confirm('Möchten Sie dieses Element löschen? (Ja = Löschen, Nein = Abbrechen)')) {
+                imgAnnotations = imgAnnotations.filter(ann => ann !== selectedAnnotation);
+                selectedAnnotation = null;
+                redrawCanvas();
+                showToast('Element gelöscht');
+            }
         } else {
-            showToast('Zuerst Verschieben-Werkzeug wählen und Element anklicken');
+            if (confirm('Kein Element ausgewählt. Möchten Sie ALLE Zeichnungen löschen? (Ja = Alles löschen)')) {
+                imgAnnotations = [];
+                selectedAnnotation = null;
+                redrawCanvas();
+                showToast('Alle Zeichnungen gelöscht');
+            }
         }
     });
 
@@ -4834,7 +4906,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const ann = imgAnnotations[i];
             if (ann.type === 'text') {
                 ctx.save();
-                ctx.font = `bold ${Math.round(20 * scale)}px Inter, sans-serif`;
+                ctx.font = `bold ${Math.round(40 * scale)}px Inter, sans-serif`;
                 const txtWidth = ctx.measureText(ann.text).width;
                 ctx.restore();
                 if (Math.abs(pos.x - ann.x) < (txtWidth / 2 + 15 * scale) && Math.abs(pos.y - ann.y) < 24 * scale) {
@@ -4918,7 +4990,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const ann = imgAnnotations[i];
                     if (ann.type === 'text') {
                         ctx.save();
-                        ctx.font = `bold ${Math.round(20 * scale)}px Inter, sans-serif`;
+                        ctx.font = `bold ${Math.round(40 * scale)}px Inter, sans-serif`;
                         const txtWidth = ctx.measureText(ann.text).width;
                         ctx.restore();
                         if (Math.abs(startImgPos.x - ann.x) < (txtWidth / 2 + 15 * scale) && Math.abs(startImgPos.y - ann.y) < 24 * scale) {
@@ -5226,6 +5298,81 @@ function showReviewStatusBar(status, comment, reviewedBy) {
     }
 }
 
+let _currentProjectUnsubscribe = null;
+
+function startProjectCloudSync(pName) {
+    if (!pName || pName.trim() === '' || pName === 'Unbenanntes Projekt') {
+        if (_currentProjectUnsubscribe) {
+            _currentProjectUnsubscribe();
+            _currentProjectUnsubscribe = null;
+        }
+        return;
+    }
+
+    if (typeof isFirebaseConfigured === 'function' && isFirebaseConfigured()) {
+        if (_currentProjectUnsubscribe) {
+            _currentProjectUnsubscribe();
+            _currentProjectUnsubscribe = null;
+        }
+
+        const role = localStorage.getItem('messstellen_role');
+        _currentProjectUnsubscribe = listenForCloudUpdates(pName, (data) => {
+            console.log('Received real-time update from cloud:', data);
+            
+            // 1. Update review status bar (only for Messhelfer)
+            if (role === 'messhelfer') {
+                if (data.reviewStatus && data.reviewStatus !== 'draft') {
+                    showReviewStatusBar(data.reviewStatus, data.reviewComment, data.reviewedBy);
+                } else {
+                    const bar = $('reviewStatusBar');
+                    if (bar) bar.style.display = 'none';
+                }
+            }
+
+            // 2. Load the actual data and map drawings from cloud
+            if (data.data) {
+                AppState.data = data.data;
+                // Merge new columns if any
+                if (data.newCols) {
+                    AppState.newCols = new Set(data.newCols);
+                    let zusatzGroup = TABLE_STRUCTURE.find(g => g.group === 'Zusatz');
+                    if (!zusatzGroup) {
+                        zusatzGroup = { group: 'Zusatz', class: 'zusatz', columns: [] };
+                        TABLE_STRUCTURE.push(zusatzGroup);
+                    }
+                    AppState.newCols.forEach(col => { if (!zusatzGroup.columns.includes(col)) zusatzGroup.columns.push(col); });
+                }
+                
+                // If there's map data or star data, save/restore it in the library too
+                const lib = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
+                if (!lib[pName]) lib[pName] = {};
+                lib[pName].name = pName;
+                lib[pName].data = data.data;
+                lib[pName].mapData = data.mapData || null;
+                lib[pName].starData = data.starData || [];
+                lib[pName].hiddenMapColors = data.hiddenMapColors || [];
+                lib[pName].newCols = data.newCols || [];
+                lib[pName].timestamp = Date.now();
+                lib[pName].reviewStatus = data.reviewStatus || 'draft';
+                localStorage.setItem('messstellen_library', JSON.stringify(lib));
+
+                // Re-render
+                renderTable();
+                if (map) {
+                    restoreMapDrawings();
+                }
+                // Refresh statistics if active tab is statistics
+                const activeTab = document.querySelector('.tab-btn.active');
+                if (activeTab && activeTab.dataset.tab === 'plot') {
+                    if (typeof renderAppPlot === 'function') renderAppPlot();
+                }
+
+                showToast('🔄 Projekt-Updates synchronisiert');
+            }
+        });
+    }
+}
+
 // ─── OPEN REVIEW PANEL (Prüfer) ───
 async function openReviewPanel() {
     const modal = $('reviewModal');
@@ -5330,7 +5477,7 @@ function renderReviewListFiltered(filter) {
         }
 
         card.innerHTML = `
-            <div class="review-project-info">
+            <div class="review-project-info" style="flex: 1;">
                 <div class="review-project-name">${project.name || project.id}</div>
                 <div class="review-project-meta">
                     <span>${project.updatedBy || ''}</span>
@@ -5338,10 +5485,33 @@ function renderReviewListFiltered(filter) {
                 </div>
                 ${project.reviewComment ? `<div style="font-size:11px;color:var(--danger);margin-top:4px;"><i class="fas fa-comment"></i> ${project.reviewComment}</div>` : ''}
             </div>
-            <span class="review-status-chip ${statusClass}">${statusLabel}</span>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span class="review-status-chip ${statusClass}">${statusLabel}</span>
+                <button class="btn-icon delete-btn" style="color: var(--danger); background: none; border: none; cursor: pointer; padding: 8px; font-size: 14px;" title="Projekt löschen"><i class="fas fa-trash"></i></button>
+            </div>
         `;
 
-        card.onclick = () => openReviewDetail(project);
+        const deleteBtn = card.querySelector('.delete-btn');
+        deleteBtn.onclick = async (e) => {
+            e.stopPropagation();
+            if (confirm(`Projekt "${project.name || project.id}" unwiderruflich aus der Cloud löschen?`)) {
+                if (typeof deleteFromCloud === 'function') {
+                    await deleteFromCloud(project.name || project.id);
+                    showToast('Projekt aus der Cloud gelöscht');
+                    if (typeof isFirebaseConfigured === 'function' && isFirebaseConfigured()) {
+                        _allCloudProjects = await getAllCloudProjects();
+                        renderReviewListFiltered(filter);
+                    }
+                }
+            }
+        };
+
+        const infoArea = card.querySelector('.review-project-info');
+        const chipArea = card.querySelector('.review-status-chip');
+        const handleOpen = () => openReviewDetail(project);
+        infoArea.onclick = handleOpen;
+        chipArea.onclick = handleOpen;
+
         list.appendChild(card);
     });
 }
@@ -5384,7 +5554,7 @@ function openReviewDetail(project) {
             ...cols.filter(c => !priorityCols.includes(c))
         ];
 
-        let html = '<div style="overflow-x:auto;"><table class="review-detail-table"><thead><tr>';
+        let html = '<table class="review-detail-table"><thead><tr>';
         html += '<th>#</th>';
         sortedCols.forEach(c => {
             const label = c.includes('_') ? c.split('_')[0] : c;
@@ -5404,7 +5574,7 @@ function openReviewDetail(project) {
             html += '</tr>';
         });
 
-        html += '</tbody></table></div>';
+        html += '</tbody></table>';
         content.innerHTML = html;
     }
 

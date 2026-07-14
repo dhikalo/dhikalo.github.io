@@ -30,7 +30,8 @@ const CloudState = {
     syncStatus: 'offline', // 'synced', 'syncing', 'offline', 'error'
     unsubscribers: [], // Firestore listeners to clean up
     lastSyncTime: null,
-    pendingWrites: 0
+    pendingWrites: 0,
+    sessionId: Math.random().toString(36).substring(2) + Date.now().toString(36)
 };
 
 // ─── REVIEW STATUS CONSTANTS ───
@@ -180,6 +181,7 @@ async function saveToCloud(projectName, projectData) {
             updatedBy: CloudState.userName || 'Unbekannt',
             updatedByRole: CloudState.role || 'unknown',
             userId: CloudState.userId,
+            sessionId: CloudState.sessionId,
             reviewStatus: projectData.reviewStatus || REVIEW_STATUS.DRAFT,
             reviewComment: projectData.reviewComment || '',
             reviewedBy: projectData.reviewedBy || '',
@@ -235,6 +237,17 @@ function listenForCloudUpdates(projectName, callback) {
     const unsubscribe = docRef.onSnapshot(doc => {
         if (doc.exists) {
             const data = doc.data();
+            
+            // 1. Ignore updates from our own session to prevent cursor jumping/reverts while typing
+            if (data.sessionId === CloudState.sessionId) {
+                return;
+            }
+            
+            // 2. Ignore local writes (metadata changes) to prevent feedback loops
+            if (doc.metadata && doc.metadata.hasPendingWrites) {
+                return;
+            }
+
             // Only update if the change came from someone else
             if (data.userId !== CloudState.userId ||
                 (data.updatedByRole === 'pruefer' && CloudState.role === 'messhelfer') ||
@@ -287,7 +300,11 @@ async function submitForReview(projectName) {
             submittedBy: CloudState.userName,
             reviewComment: '',
             reviewedBy: '',
-            name: projectName
+            name: projectName,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedBy: CloudState.userName || 'Messhelfer',
+            updatedByRole: CloudState.role || 'messhelfer',
+            sessionId: CloudState.sessionId
         }, { merge: true });
 
         if (typeof showToast === 'function') showToast('✅ Zur Prüfung eingereicht!');
@@ -308,7 +325,11 @@ async function approveProject(projectName) {
             reviewStatus: REVIEW_STATUS.APPROVED,
             reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
             reviewedBy: CloudState.userName || 'Prüfer',
-            reviewComment: ''
+            reviewComment: '',
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedBy: CloudState.userName || 'Prüfer',
+            updatedByRole: CloudState.role || 'pruefer',
+            sessionId: CloudState.sessionId
         });
 
         if (typeof showToast === 'function') showToast('✅ Projekt genehmigt!');
@@ -328,7 +349,11 @@ async function rejectProject(projectName, reason) {
             reviewStatus: REVIEW_STATUS.REJECTED,
             reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
             reviewedBy: CloudState.userName || 'Prüfer',
-            reviewComment: reason || 'Kein Grund angegeben'
+            reviewComment: reason || 'Kein Grund angegeben',
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedBy: CloudState.userName || 'Prüfer',
+            updatedByRole: CloudState.role || 'pruefer',
+            sessionId: CloudState.sessionId
         });
 
         if (typeof showToast === 'function') showToast('❌ Projekt abgelehnt');
@@ -347,7 +372,11 @@ async function reopenProject(projectName) {
         await docRef.update({
             reviewStatus: REVIEW_STATUS.DRAFT,
             reviewComment: '',
-            reviewedBy: ''
+            reviewedBy: '',
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedBy: CloudState.userName || 'Messhelfer',
+            updatedByRole: CloudState.role || 'messhelfer',
+            sessionId: CloudState.sessionId
         });
 
         if (typeof showToast === 'function') showToast('📝 Projekt wieder geöffnet');
