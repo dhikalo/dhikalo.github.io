@@ -203,9 +203,21 @@ async function saveToCloud(projectName, projectData) {
         console.error('Cloud save error:', err);
         CloudState.pendingWrites--;
         updateCloudStatus('error');
-        
+
         if (typeof showToast === 'function') {
-            showToast('Cloud-Sync fehlgeschlagen: ' + err.message);
+            // Firestore documents are capped at ~1MB. Photos are already offloaded
+            // to Storage above, so this almost always means the project itself
+            // (many rows / many custom columns of text) has grown too large for a
+            // single document. Give a clear, actionable message instead of the
+            // raw Firestore error, and keep working locally — saveToStorage()
+            // already wrote everything to localStorage regardless of this failure.
+            const isTooLarge = err.code === 'invalid-argument' ||
+                (err.message && (err.message.includes('longer than') || err.message.includes('exceeds the maximum')));
+            if (isTooLarge) {
+                showToast('⚠️ Projekt zu groß für Cloud-Sync (Firestore-Limit 1MB). Daten sind lokal gespeichert, aber nicht in der Cloud. Bitte Projekt aufteilen oder Fotos prüfen.', 6000);
+            } else {
+                showToast('Cloud-Sync fehlgeschlagen: ' + err.message);
+            }
         }
     }
 }

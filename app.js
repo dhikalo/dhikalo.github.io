@@ -71,6 +71,18 @@ let draggingTextIdx = -1;
 const $ = (id) => document.getElementById(id);
 const on = (id, evt, cb) => { const el = $(id); if (el) el.addEventListener(evt, cb); };
 
+// Safely read + parse the project library from localStorage.
+// Returns {} if the key is missing or the stored JSON is corrupted,
+// instead of throwing and breaking whatever feature called it.
+function getLibrarySafe() {
+    try {
+        return JSON.parse(localStorage.getItem('messstellen_library') || '{}');
+    } catch (e) {
+        console.error('messstellen_library corrupted:', e);
+        return {};
+    }
+}
+
 function convertToDMS(coord, isLat) {
     var absCoord = Math.abs(coord);
     var deg = Math.floor(absCoord);
@@ -268,10 +280,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Force service worker update
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(regs => {
-            regs.forEach(reg => reg.update());
+            regs.forEach(reg => reg.update().catch(err => console.warn('SW update check failed:', err)));
         });
         navigator.serviceWorker.register('./sw.js').then(function(reg) {
-            reg.update();
+            reg.update().catch(err => console.warn('SW update check failed:', err));
             // Check for updates periodically
             reg.addEventListener('updatefound', function() {
                 var newWorker = reg.installing;
@@ -474,7 +486,7 @@ async function loadPrueferWelcomeList(filter) {
             _prueferAllProjects = [];
         }
     } else {
-        const library = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
+        const library = getLibrarySafe();
         _prueferAllProjects = Object.values(library).map(p => ({
             id: p.name, name: p.name, data: p.data || [],
             rowCount: (p.data || []).length,
@@ -555,7 +567,7 @@ async function openProjectForReview(project) {
     const pName = project.name || project.id;
 
     // Try to get full data with images from localStorage first
-    const lib = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
+    const lib = getLibrarySafe();
     const localProject = lib[pName];
 
     // Use cloud data as base, but restore images from localStorage if available
@@ -577,6 +589,13 @@ async function openProjectForReview(project) {
     AppState.data = projectData;
     const nameInput = $('projectName');
     if (nameInput) nameInput.value = pName;
+
+    // Cell formatting (bold/colors) is a local-only concept — it was never part
+    // of the cloud payload — so restore it from this device's cached copy if
+    // one exists, same as images are restored above.
+    if (typeof cellFormatting !== 'undefined') {
+        cellFormatting = (localProject && localProject.cellFormatting) || {};
+    }
 
     if (project.newCols) {
         AppState.newCols = new Set(project.newCols);
@@ -715,6 +734,11 @@ function initGlobalErrorHandler() {
 
     window.addEventListener('unhandledrejection', function(event) {
         console.error('Unhandled promise rejection:', event.reason);
+        // Ignore Service Worker update errors
+        if (event.reason && event.reason.message && event.reason.message.includes('ServiceWorker')) {
+            event.preventDefault();
+            return;
+        }
         showToast('Fehler: ' + (event.reason && event.reason.message ? event.reason.message : 'Async-Fehler'));
         event.preventDefault();
     });
@@ -1048,7 +1072,7 @@ function handleFileUpload(file) {
             }
 
             // Check if project exists in library
-            let library = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
+            let library = getLibrarySafe();
             const existingProject = library[projectName];
             if (existingProject) {
                 if (existingProject.hiddenMapColors) {
@@ -1230,19 +1254,37 @@ function renderTableBody() {
                     td.style.textAlign = 'center';
                     const isBilder = col.toLowerCase().includes('bilder');
                     
-                    if (originalRow[col]) {
+                    if (originalRow[col] === '__IMAGE_REF__') {
+                        // Placeholder left behind when a cloud upload of this photo
+                        // failed and this device never had the original file — there
+                        // is genuinely nothing to display or open here.
+                        td.innerHTML = '<span style="color:var(--text-muted);font-size:11px;" title="Foto wurde in die Cloud hochgeladen, ist aber auf diesem Gerät nicht verfügbar"><i class="fas fa-cloud-slash"></i> nicht verfügbar</span>';
+                    } else if (originalRow[col]) {
                         const imgContainer = document.createElement('div');
                         imgContainer.className = 'table-img-container';
 
                         const imgPreview = document.createElement('img');
                         imgPreview.src = originalRow[col];
                         imgPreview.className = 'table-img-preview';
-                        imgPreview.title = isBilder ? 'Foto bearbeiten' : 'Ansehen';
+                        imgPreview.title = 'Ansehen';
+                        imgPreview.onerror = () => {
+                            imgPreview.replaceWith(document.createRange().createContextualFragment(
+                                '<span style="color:var(--danger);font-size:11px;"><i class="fas fa-triangle-exclamation"></i> Ladefehler</span>'
+                            ));
+                        };
                         imgPreview.onclick = () => {
-                            if (isBilder) openImageEditor(originalRow[col], idx, col);
-                            else openImagePreview(originalRow[col]);
+                            openImagePreview(originalRow[col]);
                         };
                         imgContainer.appendChild(imgPreview);
+
+                        if (isBilder) {
+                            const editBtn = document.createElement('button');
+                            editBtn.className = 'toolbar-btn';
+                            editBtn.innerHTML = '<i class="fas fa-edit"></i>';
+                            editBtn.title = 'Foto bearbeiten';
+                            editBtn.onclick = () => openImageEditor(originalRow[col], idx, col);
+                            imgContainer.appendChild(editBtn);
+                        }
 
                         const delBtn = document.createElement('button');
                         delBtn.className = 'toolbar-btn';
@@ -1320,6 +1362,7 @@ function renderTableBody() {
 
                     inp.onfocus = () => { AppState.selectedCell = `${idx}-${col}`; syncMapWithTable(); };
                     inp.oninput = (e) => {
+                        AppState._lastLocalEditTime = Date.now();
                         originalRow[col] = e.target.value;
                         updateLiveCalculations(originalRow, col, tr);
                         if (col === 'Koordinaten') {
@@ -1386,8 +1429,8 @@ function syncMapWithTable() {
                 interactive: true,
                 draggable: true,
                 icon: L.divIcon({
-                    html: `<div style="background:${color};width:24px;height:24px;border-radius:50%;border:3px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,0.5);"></div>`,
-                    iconSize: [24, 24], iconAnchor: [12, 12], className: 'table-synced-marker'
+                    html: `<div style="background:${color};width:10px;height:10px;border-radius:50%;border:2px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,0.5);"></div>`,
+                    iconSize: [10, 10], iconAnchor: [5, 5], className: 'table-synced-marker'
                 })
             });
 
@@ -1522,16 +1565,6 @@ function saveToStorage() {
             });
         });
 
-        const project = {
-            name: pName,
-            data: AppState.data,
-            mapData: layers.drawItems ? layers.drawItems.toGeoJSON() : null,
-            starData: starData,
-            timestamp: Date.now(),
-            hiddenMapColors: Array.from(AppState.hiddenMapColors),
-            newCols: Array.from(AppState.newCols)
-        };
-
         var libraryStr = localStorage.getItem('messstellen_library');
         var library;
         try {
@@ -1543,26 +1576,80 @@ function saveToStorage() {
             showToast('Datenbank repariert — alte Projekte könnten verloren sein');
         }
 
+        var existingProject = library[pName] || {};
+
+        const project = {
+            name: pName,
+            data: AppState.data,
+            mapData: map ? (layers.drawItems ? layers.drawItems.toGeoJSON() : null) : existingProject.mapData,
+            starData: map ? starData : (existingProject.starData || []),
+            timestamp: Date.now(),
+            hiddenMapColors: Array.from(AppState.hiddenMapColors),
+            newCols: Array.from(AppState.newCols),
+            // Cell formatting (bold/italic/underline/bg-color) lived only in the
+            // page-global `cellFormatting` object and was never saved, so it
+            // silently vanished on reload or when switching projects. Persist it
+            // alongside everything else.
+            cellFormatting: (typeof cellFormatting !== 'undefined') ? cellFormatting : (existingProject.cellFormatting || {})
+        };
+
         library[pName] = project;
         
         try {
             localStorage.setItem('messstellen_library', JSON.stringify(library));
         } catch (quotaErr) {
             if (quotaErr.name === 'QuotaExceededError' || quotaErr.code === 22) {
-                // Try to free space by removing oldest projects
+                // Try to free space by removing oldest OTHER projects first
                 var names = Object.keys(library).filter(function(n) { return n !== pName; });
                 names.sort(function(a, b) { return (library[a].timestamp || 0) - (library[b].timestamp || 0); });
+                var saved = false;
                 while (names.length > 0) {
                     var oldest = names.shift();
                     delete library[oldest];
                     try {
                         localStorage.setItem('messstellen_library', JSON.stringify(library));
                         showToast('Speicher voll — Projekt "' + oldest + '" gelöscht');
+                        saved = true;
                         break;
                     } catch (e2) { continue; }
                 }
-                if (names.length === 0) {
-                    showToast('Speicher voll! Bitte große Bilder entfernen.');
+
+                // Most field users only have ONE project open, so there is often
+                // nothing else to delete — the loop above never runs and, before
+                // this fix, the ENTIRE save (photos AND the measurement values
+                // typed since the last successful save) was silently dropped.
+                // Fallback: save a copy of THIS project with its embedded photos
+                // stripped out, so the actual measurement data isn't lost too.
+                // The photos stay visible on screen (AppState.data is untouched,
+                // only a deep copy is modified here) until space is freed and a
+                // save with images succeeds again.
+                if (!saved) {
+                    try {
+                        var strippedProject = JSON.parse(JSON.stringify(project));
+                        var strippedAny = false;
+                        (strippedProject.data || []).forEach(function(row) {
+                            Object.keys(row).forEach(function(k) {
+                                if (typeof row[k] === 'string' && row[k].startsWith('data:image')) {
+                                    row[k] = '';
+                                    strippedAny = true;
+                                }
+                            });
+                        });
+                        library[pName] = strippedProject;
+                        localStorage.setItem('messstellen_library', JSON.stringify(library));
+                        saved = true;
+                        if (strippedAny) {
+                            showToast('⚠️ Speicher voll — Messwerte gespeichert, aber Fotos konnten NICHT gespeichert werden! Bitte alte Fotos löschen, dann erneut speichern.', 8000);
+                        } else {
+                            showToast('⚠️ Speicher voll — bitte Fotos oder alte Projekte löschen.', 6000);
+                        }
+                    } catch (e3) {
+                        console.error('Save still failing even without images:', e3);
+                    }
+                }
+
+                if (!saved) {
+                    showToast('❌ Speicher voll! Speichern fehlgeschlagen — bitte Fotos/alte Projekte löschen und erneut versuchen.', 8000);
                 }
             } else {
                 throw quotaErr;
@@ -1609,6 +1696,9 @@ function loadFromStorage() {
 
         AppState.hiddenMapColors = new Set(project.hiddenMapColors || []);
         AppState.newCols = new Set(project.newCols || []);
+        if (typeof cellFormatting !== 'undefined') {
+            cellFormatting = project.cellFormatting || {};
+        }
 
         if (AppState.newCols.size > 0) {
             let zusatzGroup = TABLE_STRUCTURE.find(g => g.group === 'Zusatz');
@@ -1690,8 +1780,8 @@ function initMap() {
         doubleClickZoom: false,
         preferCanvas: true,
         zoomSnap: 0.25,
-        zoomDelta: 0.5,
-        wheelPxPerZoomLevel: 100
+        zoomDelta: 0.25,
+        wheelPxPerZoomLevel: 140
     }).setView([51.1657, 10.4515], 6);
 
     L.control.zoom({ position: 'bottomleft' }).addTo(map);
@@ -1996,6 +2086,10 @@ function startGPS() {
     AppState.firstLocationFound = false;
     AppState._lastGPSUpdate = Date.now();
     AppState._gpsBuffer = []; // Reset position averaging buffer
+    // Stop any previous watch first — Leaflet's map.locate() does not clear an existing
+    // watchPosition() before starting a new one, so calling this repeatedly (e.g. pressing
+    // the GPS button again) would otherwise stack multiple native geolocation watchers.
+    map.stopLocate();
     map.locate({
         setView: false,
         maxZoom: 18,
@@ -2101,13 +2195,19 @@ function handleLocationFound(e) {
         AppState._lastStableLatLng = latlng;
     }
 
-    // The user requested to hide the black tracking dot completely
+    // Small, fixed-size (pixel-based, not meter-based) blue GPS position dot —
+    // stays small regardless of zoom level.
     if (AppState.userMarker) {
         AppState.userMarker.setLatLng(latlng);
     } else {
-        // Create marker object for getLatLng() calls, but DO NOT addTo(map)
-        const userIcon = L.divIcon({ className: 'hidden' });
-        AppState.userMarker = L.marker(latlng, { icon: userIcon, zIndexOffset: -1 });
+        const userIcon = L.divIcon({
+            className: 'gps-user-marker',
+            html: '<div style="width:12px;height:12px;border-radius:50%;background:#3b82f6;border:2px solid #fff;box-shadow:0 0 0 2px rgba(59,130,246,0.35),0 1px 4px rgba(0,0,0,0.45);"></div>',
+            iconSize: [12, 12],
+            iconAnchor: [6, 6]
+        });
+        AppState.userMarker = L.marker(latlng, { icon: userIcon, zIndexOffset: 500, interactive: false, keyboard: false });
+        if (map) AppState.userMarker.addTo(map);
     }
 
     if (AppState.accuracyCircle) {
@@ -2311,6 +2411,7 @@ function showMeasureLine() {
         var labelPos = L.latLng(center.lat + (d.dist / 111320), center.lng);
         var label = L.marker(labelPos, {
             interactive: false,
+            zIndexOffset: 2000,
             icon: L.divIcon({
                 html: '<div style="color:' + d.color + ';font-size:14px;font-weight:900;white-space:nowrap;text-shadow:1px 1px 2px #000, -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000;">' + d.label + '</div>',
                 iconSize: [60, 22], iconAnchor: [30, 11], className: 'measure-label'
@@ -2475,7 +2576,7 @@ function handleStickyMarkerClick(e) {
 
         // Optional: Draw a small center dot to indicate the origin (titik 0)
         var centerDot = L.circleMarker(centerLatLng, {
-            radius: 4, color: color, weight: 2, fillColor: '#fff', fillOpacity: 1
+            radius: 3, color: color, weight: 2, fillColor: '#fff', fillOpacity: 1
         });
         groupLayer.addLayer(centerDot);
 
@@ -2485,7 +2586,7 @@ function handleStickyMarkerClick(e) {
         var outermostDist = requiredDist * 3;
         var circle = L.circle(centerLatLng, {
             radius: outermostDist,
-            color: color, weight: 3, fillOpacity: 0, dashArray: '8, 8'
+            color: color, weight: 6, fillOpacity: 0, dashArray: '8, 8'
         });
         groupLayer.addLayer(circle);
 
@@ -2520,16 +2621,17 @@ function handleStickyMarkerClick(e) {
 
             // Garis lurus putus-putus
             var line = L.polyline([centerLatLng, endLatLng], {
-                color: color, weight: 3, opacity: 1.0, dashArray: '8, 8'
+                color: color, weight: 5, opacity: 1.0, dashArray: '8, 8'
             });
             groupLayer.addLayer(line);
 
             // Spoke number label (1, 2, 3) OUTSIDE the circle
-            var labelDist = outermostDist + 0.6; // +0.6 meters to sit just outside the dashed line
+            var labelDist = outermostDist + (requiredDist < 1.0 && spokeNum === 1 ? 1.5 : 0.6);
             var labelLatLng = destPoint(centerLatLng, bearingRad, labelDist);
             var distLabel = L.marker(labelLatLng, {
                 interactive: false,
                 isDistLabel: true,
+                zIndexOffset: 2000,
                 icon: L.divIcon({
                     html: `<div style="color:${color};font-size:22px;font-weight:900;white-space:nowrap;text-shadow:-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, 0px 0px 8px #000;">` + spokeNum + `</div>`,
                     iconSize: [60, 26], iconAnchor: [30, 13], className: 'dist-label'
@@ -2742,7 +2844,7 @@ function refreshMapVisibility() {
 function restoreMapDrawings() {
     const pName = ($('projectName') || {}).value;
     if (!pName) return;
-    let library = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
+    let library = getLibrarySafe();
     const project = library[pName];
 
     // Restore freehand drawItems
@@ -2779,13 +2881,16 @@ function restoreMapDrawings() {
     }
 
     // Restore Mercedes Stars
-    if (map && project && project.starData && project.starData.length > 0) {
-        // Clear existing stars first
+    if (map && project) {
+        // Clear existing stars and reset the marker counter unconditionally —
+        // otherwise switching to a project with no stars yet keeps the
+        // previously loaded project's stale marker count/numbering around.
         if (layers.star08) layers.star08.clearLayers();
         if (layers.star16) layers.star16.clearLayers();
         if (layers.star32) layers.star32.clearLayers();
         AppState.depthMarkers = { '0.8': [], '1.6': [], '3.2': [] };
 
+        if (project.starData && project.starData.length > 0) {
         project.starData.forEach(function(star) {
             var centerLatLng = L.latLng(star.lat, star.lng);
             var color = star.color;
@@ -2826,10 +2931,11 @@ function restoreMapDrawings() {
                 groupLayer.addLayer(line);
 
                 // Spoke number label (1, 2, 3) OUTSIDE the circle
-                var labelDist = outermostDist + 0.6; // +0.6 meters to sit just outside the dashed line
+                var labelDist = outermostDist + (requiredDist < 1.0 && spokeNum === 1 ? 1.5 : 0.6);
                 var labelLatLng = destPoint(centerLatLng, bearingRad, labelDist);
                 var distLabel = L.marker(labelLatLng, {
                     interactive: false,
+                    zIndexOffset: 2000,
                     icon: L.divIcon({
                         html: `<div style="color:${color};font-size:22px;font-weight:900;white-space:nowrap;text-shadow:-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, 0px 0px 8px #000;">` + spokeNum + `</div>`,
                         iconSize: [60, 26], iconAnchor: [30, 13], className: 'dist-label'
@@ -2858,6 +2964,7 @@ function restoreMapDrawings() {
         });
 
         refreshMapVisibility();
+        }
     }
 }
 
@@ -3162,8 +3269,18 @@ function saveFinalSnip() {
         saveToStorage();
         $('snipConfirmModal').style.display = 'none';
 
-        // Upload to Firebase Storage so Prüfer can see the image
-        _uploadImageToCloudIfPossible(targetIdx, targetCol, dataUrl);
+        // NOTE: uploading this photo to Firebase Storage for cloud sync is already
+        // handled by saveToStorage() -> saveToCloud() (firebase-config.js), which
+        // builds a SEPARATE copy for the Firestore document and never touches the
+        // local AppState.data. We used to also call _uploadImageToCloudIfPossible()
+        // here, which re-uploaded the same photo AGAIN and then overwrote the local
+        // base64 with the resulting https:// Storage URL. That broke re-opening/
+        // re-editing the photo on this same device: Storage URLs need CORS to be
+        // usable on a <canvas> (for annotation), most Firebase projects don't have
+        // that configured, and the fallback that let the image just be *displayed*
+        // left the canvas "tainted" so Save then failed with
+        // "SecurityError: Tainted canvases may not be exported". Removing this call
+        // keeps the reliable local base64 as the source of truth on this device.
 
     } catch (err) {
         if (err.name === 'SecurityError' || String(err).includes('tainted')) {
@@ -3172,24 +3289,6 @@ function saveFinalSnip() {
             showToast('Fehler: ' + err.message);
         }
         console.error('saveFinalSnip error:', err);
-    }
-}
-
-// Upload a single image to Firebase Storage and update the cloud document
-async function _uploadImageToCloudIfPossible(rowIdx, colName, base64DataUrl) {
-    if (typeof isFirebaseConfigured !== 'function' || !isFirebaseConfigured()) return;
-    if (typeof uploadPhotoToStorage !== 'function') return;
-    const pName = ($('projectName') || {}).value;
-    if (!pName) return;
-    try {
-        const url = await uploadPhotoToStorage(pName, rowIdx, colName, base64DataUrl);
-        if (url) {
-            // Replace local base64 with Storage URL in the data
-            AppState.data[rowIdx][colName] = url;
-            saveToStorage();
-        }
-    } catch (e) {
-        console.warn('Image upload to Storage failed:', e);
     }
 }
 
@@ -3282,7 +3381,7 @@ function openColManager() {
 function renderProjectList() {
     const grid = $('standortGrid');
     if (!grid) return;
-    const library = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
+    const library = getLibrarySafe();
 
     if (Object.keys(library).length === 0) {
         grid.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:24px;">Keine Projekte vorhanden</p>';
@@ -3336,13 +3435,16 @@ function renderProjectList() {
 }
 
 function loadProject(name) {
-    let library = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
+    let library = getLibrarySafe();
     const p = library[name];
     if (p) {
         localStorage.setItem('current_project_id', name);
         AppState.data = p.data || [];
         AppState.hiddenMapColors = new Set(p.hiddenMapColors || []);
         AppState.newCols = new Set(p.newCols || []);
+        if (typeof cellFormatting !== 'undefined') {
+            cellFormatting = p.cellFormatting || {};
+        }
         const nameInput = $('projectName');
         if (nameInput) nameInput.value = p.name;
         renderTable();
@@ -3374,6 +3476,27 @@ window.confirmExportDepths = function() {
     $('exportModal').style.display = 'none';
     exportExcel(opts);
 };
+
+// Fetch a Firebase Storage (or any http/https) image URL and convert it to a
+// base64 data URL so it can be embedded via ExcelJS (which only accepts base64,
+// not remote URLs). Returns null on any failure so the caller can skip that
+// image gracefully instead of crashing the whole export.
+async function resolveRemoteImageToDataUrl(url) {
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        const blob = await resp.blob();
+        return await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result || null);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) {
+        console.warn('Could not fetch remote image for export:', url, e);
+        return null;
+    }
+}
 
 async function exportExcel(opts) {
     const loadingEl = $('loadingOverlay');
@@ -3584,6 +3707,27 @@ async function exportExcel(opts) {
                    });
         });
 
+        // Pre-fetch every remote (Firebase Storage) photo referenced by the export
+        // IN PARALLEL, once, before writing any rows. Doing this here — instead of
+        // awaiting one fetch at a time inside the row loop — is what makes export
+        // of photo-heavy projects fast instead of taking one round-trip per photo.
+        const remoteImageCache = new Map();
+        {
+            const urlsToFetch = new Set();
+            exportData.forEach(d => {
+                colDefinitions.forEach(colDef => {
+                    if (!colDef.isImage) return;
+                    const val = d[colDef.key];
+                    if (typeof val === 'string' && val.startsWith('http')) urlsToFetch.add(val);
+                });
+            });
+            if (urlsToFetch.size > 0) {
+                const urls = Array.from(urlsToFetch);
+                const results = await Promise.all(urls.map(u => resolveRemoteImageToDataUrl(u)));
+                urls.forEach((u, idx) => remoteImageCache.set(u, results[idx]));
+            }
+        }
+
         for (let i = 0; i < exportData.length; i++) {
             const d = exportData[i];
             const exRow = ws.getRow(DATA_START + i);
@@ -3616,12 +3760,29 @@ async function exportExcel(opts) {
             for (let colIdx = 0; colIdx < colDefinitions.length; colIdx++) {
                 const colDef = colDefinitions[colIdx];
                 if (colDef.isImage) {
-                    const imgData = d[colDef.key];
+                    let imgData = d[colDef.key];
+
+                    // Photos taken while cloud sync is active get uploaded to Firebase
+                    // Storage in the background, which replaces the local base64 string
+                    // with a remote https:// URL (to keep Firestore docs small). Without
+                    // this resolution step, those photos would silently disappear from
+                    // the export because they no longer start with "data:image".
+                    if (imgData && typeof imgData === 'string' && imgData.startsWith('http')) {
+                        imgData = remoteImageCache.has(imgData)
+                            ? remoteImageCache.get(imgData)
+                            : await resolveRemoteImageToDataUrl(imgData);
+                    } else if (imgData === '__IMAGE_REF__') {
+                        // Placeholder left behind when a cloud upload failed and no
+                        // Storage URL or local copy of the photo is available — nothing
+                        // to embed.
+                        imgData = null;
+                    }
+
                     if (imgData && imgData.startsWith('data:image')) {
                         rowHasImage = true;
                         let ext = 'png';
                         if (imgData.includes('image/jpeg') || imgData.includes('image/jpg')) ext = 'jpeg';
-                        
+
                         const img = new Image();
                         await new Promise((resolve) => {
                             img.onload = () => resolve();
@@ -4274,28 +4435,39 @@ async function exportExcel(opts) {
 
             imageCols.forEach((colInfo) => {
                 const imgData = d[colInfo.key];
-                if (imgData && imgData.startsWith('data:image')) {
-                    let ext = 'jpg';
-                    if (imgData.includes('image/png')) ext = 'png';
-                    else if (imgData.includes('image/webp')) ext = 'webp';
-
-                    let filename = `Foto_${rowIdx + 1}_${colInfo.suffix}.${ext}`;
+                if (imgData) {
+                    let filename = `Foto_${rowIdx + 1}_${colInfo.suffix}.jpg`;
                     const meterVal = (d['Meter [m]'] || '').toString().trim();
                     if (meterVal !== '') {
                         const cleanMeter = meterVal.replace(/[^a-zA-Z0-9_\-]/g, '_');
-                        filename = `${cleanMeter}_${colInfo.suffix}.${ext}`;
+                        filename = `${cleanMeter}_${colInfo.suffix}.jpg`;
                     }
 
                     downloadCount++;
-                    // Trigger download with a slight staggered delay to prevent browser download congestion
-                    setTimeout(() => {
-                        const link = document.createElement('a');
-                        link.download = filename;
-                        link.href = imgData;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                    }, downloadCount * 120);
+                    setTimeout(async () => {
+                        try {
+                            let downloadUrl = imgData;
+                            if (imgData.startsWith('http')) {
+                                // Fetch cross-origin URL to enforce download with custom filename
+                                const resp = await fetch(imgData);
+                                const blob = await resp.blob();
+                                downloadUrl = URL.createObjectURL(blob);
+                            }
+                            
+                            const link = document.createElement('a');
+                            link.download = filename;
+                            link.href = downloadUrl;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            
+                            if (imgData.startsWith('http')) {
+                                setTimeout(() => URL.revokeObjectURL(downloadUrl), 5000);
+                            }
+                        } catch (e) {
+                            console.error('Download error for image:', e);
+                        }
+                    }, downloadCount * 300); // Increased delay slightly to ensure downloads complete without error
                 }
             });
         });
@@ -4686,10 +4858,20 @@ function openImageEditor(dataUrl, rowIdx, colName) {
     initImageEditorCanvas(dataUrl);
 }
 
-function initImageEditorCanvas(imgSrc) {
+function initImageEditorCanvas(imgSrc, _retryWithoutCors) {
     const canvas = $('imgEditorCanvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
+    // A photo can still be a remote Firebase Storage URL here (e.g. a Prüfer
+    // opening a Messhelfer's cloud-synced project on a different device that
+    // never had the original local file). Those need crossOrigin='Anonymous' so
+    // the canvas isn't "tainted" (which would block saving edits later) — but
+    // most Storage buckets aren't CORS-configured, so this usually fails and
+    // falls back to the no-CORS retry below (view-only; Save will then show a
+    // clear error instead of exporting broken/blocked data).
+    if (imgSrc && imgSrc.startsWith('http') && !_retryWithoutCors) {
+        img.crossOrigin = 'Anonymous';
+    }
     img.onload = () => {
         let w = img.width;
         let h = img.height;
@@ -4707,6 +4889,21 @@ function initImageEditorCanvas(imgSrc) {
         draggingHandle = null;
         redrawCanvas();
         $('imageEditorModal').style.display = 'flex';
+        if (_retryWithoutCors) {
+            showToast('⚠️ Foto geladen, aber Bearbeiten/Speichern könnte wegen Cloud-Zugriffsbeschränkung fehlschlagen.');
+        }
+    };
+    img.onerror = () => {
+        // Without this handler, a failed load (offline, expired/blocked Storage
+        // URL, missing CORS config on the bucket) did NOTHING visible at all —
+        // clicking the photo just seemed to not work.
+        if (imgSrc && imgSrc.startsWith('http') && !_retryWithoutCors) {
+            // Retry once without crossOrigin — lets the user at least view/edit
+            // the photo even if a later save might fail on a tainted canvas.
+            initImageEditorCanvas(imgSrc, true);
+        } else {
+            showToast('❌ Foto konnte nicht geladen werden (offline oder Cloud-Zugriff blockiert).');
+        }
     };
     img.src = imgSrc;
 }
@@ -5163,7 +5360,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnSave.addEventListener('click', () => {
             selectedAnnotation = null;
             redrawCanvas();
-            
+
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = canvas.width;
             tempCanvas.height = canvas.height;
@@ -5171,14 +5368,30 @@ document.addEventListener('DOMContentLoaded', () => {
             tCtx.fillStyle = '#ffffff';
             tCtx.fillRect(0, 0, canvas.width, canvas.height);
             tCtx.drawImage(canvas, 0, 0);
-            
-            const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.80); // Compress quality to 80% to fit localStorage
+
+            let dataUrl;
+            try {
+                dataUrl = tempCanvas.toDataURL('image/jpeg', 0.80); // Compress quality to 80% to fit localStorage
+            } catch (e) {
+                // "Tainted canvases may not be exported" — this photo was loaded
+                // from a remote Storage URL that isn't CORS-enabled, so the pixel
+                // data can't be read back out to save annotations. Explain clearly
+                // instead of letting the raw SecurityError surface as a generic
+                // error toast; the un-annotated photo itself is unaffected.
+                console.error('Canvas export blocked (tainted):', e);
+                showToast('❌ Bearbeitete Version kann nicht gespeichert werden: Dieses Foto kommt aus der Cloud und blockiert (CORS). Bitte Foto neu aufnehmen statt zu bearbeiten.', 7000);
+                return;
+            }
+
             if (currentBilderRow > -1 && currentBilderCol) {
                 AppState.data[currentBilderRow][currentBilderCol] = dataUrl;
                 saveToStorage();
                 renderTable();
-                // Upload to Firebase Storage so Prüfer can see the image
-                _uploadImageToCloudIfPossible(currentBilderRow, currentBilderCol, dataUrl);
+                // Cloud upload for this photo is already handled by
+                // saveToStorage() -> saveToCloud(), which builds a separate copy
+                // for Firestore and never overwrites the local base64 here — see
+                // the note in saveFinalSnip() for why we stopped doing that
+                // separately.
             }
             $('imageEditorModal').style.display = 'none';
         });
@@ -5318,8 +5531,9 @@ function startProjectCloudSync(pName) {
         const role = localStorage.getItem('messstellen_role');
         _currentProjectUnsubscribe = listenForCloudUpdates(pName, (data) => {
             console.log('Received real-time update from cloud:', data);
-            
-            // 1. Update review status bar (only for Messhelfer)
+
+            // 1. Update review status bar (only for Messhelfer) — safe to do
+            // immediately, this never touches the table/AppState.data.
             if (role === 'messhelfer') {
                 if (data.reviewStatus && data.reviewStatus !== 'draft') {
                     showReviewStatusBar(data.reviewStatus, data.reviewComment, data.reviewedBy);
@@ -5329,48 +5543,69 @@ function startProjectCloudSync(pName) {
                 }
             }
 
-            // 2. Load the actual data and map drawings from cloud
+            // 2. Load the actual data and map drawings from cloud — but only
+            // once the local user has been idle for a moment. Applying this
+            // instantly would call renderTable() and rebuild every cell input,
+            // wiping out whatever the user is currently typing (their keystrokes
+            // simply disappear mid-word if a Prüfer/Messhelfer on another device
+            // saves at the same time).
             if (data.data) {
-                AppState.data = data.data;
-                // Merge new columns if any
-                if (data.newCols) {
-                    AppState.newCols = new Set(data.newCols);
-                    let zusatzGroup = TABLE_STRUCTURE.find(g => g.group === 'Zusatz');
-                    if (!zusatzGroup) {
-                        zusatzGroup = { group: 'Zusatz', class: 'zusatz', columns: [] };
-                        TABLE_STRUCTURE.push(zusatzGroup);
-                    }
-                    AppState.newCols.forEach(col => { if (!zusatzGroup.columns.includes(col)) zusatzGroup.columns.push(col); });
-                }
-                
-                // If there's map data or star data, save/restore it in the library too
-                const lib = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
-                if (!lib[pName]) lib[pName] = {};
-                lib[pName].name = pName;
-                lib[pName].data = data.data;
-                lib[pName].mapData = data.mapData || null;
-                lib[pName].starData = data.starData || [];
-                lib[pName].hiddenMapColors = data.hiddenMapColors || [];
-                lib[pName].newCols = data.newCols || [];
-                lib[pName].timestamp = Date.now();
-                lib[pName].reviewStatus = data.reviewStatus || 'draft';
-                localStorage.setItem('messstellen_library', JSON.stringify(lib));
-
-                // Re-render
-                renderTable();
-                if (map) {
-                    restoreMapDrawings();
-                }
-                // Refresh statistics if active tab is statistics
-                const activeTab = document.querySelector('.tab-btn.active');
-                if (activeTab && activeTab.dataset.tab === 'plot') {
-                    if (typeof renderAppPlot === 'function') renderAppPlot();
-                }
-
-                showToast('🔄 Projekt-Updates synchronisiert');
+                applyIncomingCloudData(pName, data);
             }
         });
     }
+}
+
+// Applies a remote Firestore update to the local table, but waits out any
+// in-progress local editing first so an incoming sync never overwrites
+// keystrokes the user hasn't finished typing yet. Retries for up to ~20s,
+// then applies anyway so the app never gets permanently stuck out of sync.
+function applyIncomingCloudData(pName, data, _attempt) {
+    _attempt = _attempt || 0;
+    const QUIET_MS = 2500;
+    const sinceEdit = Date.now() - (AppState._lastLocalEditTime || 0);
+    if (sinceEdit < QUIET_MS && _attempt < 8) {
+        setTimeout(() => applyIncomingCloudData(pName, data, _attempt + 1), QUIET_MS);
+        return;
+    }
+
+    AppState.data = data.data;
+    // Merge new columns if any
+    if (data.newCols) {
+        AppState.newCols = new Set(data.newCols);
+        let zusatzGroup = TABLE_STRUCTURE.find(g => g.group === 'Zusatz');
+        if (!zusatzGroup) {
+            zusatzGroup = { group: 'Zusatz', class: 'zusatz', columns: [] };
+            TABLE_STRUCTURE.push(zusatzGroup);
+        }
+        AppState.newCols.forEach(col => { if (!zusatzGroup.columns.includes(col)) zusatzGroup.columns.push(col); });
+    }
+
+    // If there's map data or star data, save/restore it in the library too
+    const lib = getLibrarySafe();
+    if (!lib[pName]) lib[pName] = {};
+    lib[pName].name = pName;
+    lib[pName].data = data.data;
+    lib[pName].mapData = data.mapData || null;
+    lib[pName].starData = data.starData || [];
+    lib[pName].hiddenMapColors = data.hiddenMapColors || [];
+    lib[pName].newCols = data.newCols || [];
+    lib[pName].timestamp = Date.now();
+    lib[pName].reviewStatus = data.reviewStatus || 'draft';
+    localStorage.setItem('messstellen_library', JSON.stringify(lib));
+
+    // Re-render
+    renderTable();
+    if (map) {
+        restoreMapDrawings();
+    }
+    // Refresh statistics if active tab is statistics
+    const activeTab = document.querySelector('.tab-btn.active');
+    if (activeTab && activeTab.dataset.tab === 'plot') {
+        if (typeof renderAppPlot === 'function') renderAppPlot();
+    }
+
+    showToast('🔄 Projekt-Updates synchronisiert');
 }
 
 // ─── OPEN REVIEW PANEL (Prüfer) ───
@@ -5388,7 +5623,7 @@ async function openReviewPanel() {
         }
     } else {
         // Local mode — use localStorage
-        const library = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
+        const library = getLibrarySafe();
         _allCloudProjects = Object.values(library).map(p => ({
             id: p.name,
             name: p.name,
@@ -5598,7 +5833,7 @@ function openReviewDetail(project) {
                 await approveProject(projectName);
             } else {
                 // Local mode
-                let library = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
+                let library = getLibrarySafe();
                 if (library[projectName]) {
                     library[projectName].reviewStatus = 'approved';
                     localStorage.setItem('messstellen_library', JSON.stringify(library));
@@ -5622,7 +5857,7 @@ function openReviewDetail(project) {
             if (typeof isFirebaseConfigured === 'function' && isFirebaseConfigured()) {
                 await rejectProject(projectName, reason);
             } else {
-                let library = JSON.parse(localStorage.getItem('messstellen_library') || '{}');
+                let library = getLibrarySafe();
                 if (library[projectName]) {
                     library[projectName].reviewStatus = 'rejected';
                     library[projectName].reviewComment = reason;

@@ -774,7 +774,8 @@ body {
     overflow-x: hidden;
     z-index: 100001;
     flex-shrink: 0;
-    order: 1; /* Render on the right side of the map by default */
+    order: 1;
+    /* Render on the right side of the map by default */
     transition: width 0.3s ease;
     -webkit-overflow-scrolling: touch;
 }
@@ -801,7 +802,8 @@ body {
 }
 
 .map-layout.show {
-    flex-direction: row; /* Align map left, sidebar right by default (portrait) */
+    flex-direction: row;
+    /* Align map left, sidebar right by default (portrait) */
 }
 
 .sidebar-header {
@@ -1535,7 +1537,8 @@ body {
 @media (pointer: coarse) {
 
     .map-sidebar:not(.collapsed) {
-        min-height: 200px; /* More height for touch targets */
+        min-height: 200px;
+        /* More height for touch targets */
     }
 
     /* Minimum 48px touch targets — Apple HIG */
@@ -1795,9 +1798,22 @@ body {
 .custom-marker-icon,
 .numbered-marker,
 .start-marker,
-.user-icon {
+.user-icon,
+.dist-label,
+.measure-label,
+.x-marker,
+.gps-user-marker {
     background: none !important;
     border: none !important;
+}
+
+/* Distance/spoke numbers (0.8/1.6/3.2 rings, 1/2/3 spoke labels) must
+   always render above circles, lines and other markers so they never
+   get visually buried underneath. */
+.dist-label,
+.measure-label {
+    z-index: 10000 !important;
+    pointer-events: none;
 }
 
 /* ─── OFFLINE STATUS INDICATOR ─── */
@@ -2874,9 +2890,11 @@ body {
     color: var(--text-muted);
     transition: color 0.15s ease;
 }
+
 .row-mic-btn:hover {
     color: var(--accent) !important;
 }
+
 .row-mic-btn.listening {
     color: #ef4444 !important;
 }
@@ -2884,7 +2902,8 @@ body {
 /* ─── LANDSCAPE MEDIA QUERY (Laptop, iPad Landscape) ─── */
 @media (orientation: landscape) {
     .map-layout.show {
-        flex-direction: column !important; /* Stack vertically: dashboard top, map bottom */
+        flex-direction: column !important;
+        /* Stack vertically: dashboard top, map bottom */
     }
 
     .map-sidebar {
@@ -2897,17 +2916,20 @@ body {
         overflow-y: hidden !important;
         border-bottom: 1px solid var(--border) !important;
         border-left: none !important;
-        order: -1 !important; /* Render at the top of the map */
+        order: -1 !important;
+        /* Render at the top of the map */
         transition: height 0.3s ease !important;
     }
 
     .map-sidebar:not(.collapsed) {
-        min-height: 160px !important; /* Normal horizontal height on laptop */
+        min-height: 160px !important;
+        /* Normal horizontal height on laptop */
     }
 
     @media (pointer: coarse) {
         .map-sidebar:not(.collapsed) {
-            min-height: 200px !important; /* Touch targets friendly height on iPad */
+            min-height: 200px !important;
+            /* Touch targets friendly height on iPad */
         }
     }
 
@@ -2939,7 +2961,8 @@ body {
     .sidebar-section {
         border-bottom: none !important;
         border-right: 1px solid var(--border-light) !important;
-        flex: 1 0 240px !important; /* Horizontal columns don't squeeze below 240px */
+        flex: 1 0 240px !important;
+        /* Horizontal columns don't squeeze below 240px */
         width: auto !important;
         padding: 10px 14px !important;
     }
