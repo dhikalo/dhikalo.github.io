@@ -10,9 +10,9 @@
 const DEPTHS = ['0.8', '1.6', '3.2'];
 
 const TABLE_STRUCTURE = [
-    { group: 'Basis', class: 'basis', columns: ['Kennzeichen', 'Alt-Kz.', 'Typ', 'Örtlichkeit', 'Meter [m]', 'Datum', 'Sprachsteuerung'] },
-    { group: '0.8m', class: '08', columns: ['R1 [Ω]_0.8', 'R2 [Ω]_0.8', 'R3 [Ω]_0.8', 'ρ1 [Ωm]_0.8', 'ρ2 [Ωm]_0.8', 'ρ3 [Ωm]_0.8', 'MW [Ωm]_0.8', 'SD [Ωm]_0.8', 'Bilder_0.8'] },
-    { group: '1.6m', class: '16', columns: ['R1 [Ω]_1.6', 'R2 [Ω]_1.6', 'R3 [Ω]_1.6', 'ρ1 [Ωm]_1.6', 'ρ2 [Ωm]_1.6', 'ρ3 [Ωm]_1.6', 'MW [Ωm]_1.6', 'SD [Ωm]_1.6', 'Bilder_1.6'] },
+    { group: 'Basis', class: 'basis', columns: ['Kennzeichen', 'Alt-Kz.', 'Typ', 'Örtlichkeit', 'Meter [m]', 'Datum'] },
+    { group: '0.8m', class: '08', columns: ['Sprache_0.8', 'R1 [Ω]_0.8', 'R2 [Ω]_0.8', 'R3 [Ω]_0.8', 'ρ1 [Ωm]_0.8', 'ρ2 [Ωm]_0.8', 'ρ3 [Ωm]_0.8', 'MW [Ωm]_0.8', 'SD [Ωm]_0.8', 'Bilder_0.8'] },
+    { group: '1.6m', class: '16', columns: ['Sprache_1.6', 'R1 [Ω]_1.6', 'R2 [Ω]_1.6', 'R3 [Ω]_1.6', 'ρ1 [Ωm]_1.6', 'ρ2 [Ωm]_1.6', 'ρ3 [Ωm]_1.6', 'MW [Ωm]_1.6', 'SD [Ωm]_1.6', 'Bilder_1.6'] },
     { group: '3.2m', class: '32', columns: ['R1 [Ω]_3.2', 'R2 [Ω]_3.2', 'R3 [Ω]_3.2', 'ρ1 [Ωm]_3.2', 'ρ2 [Ωm]_3.2', 'ρ3 [Ωm]_3.2', 'MW [Ωm]_3.2', 'SD [Ωm]_3.2', 'Bilder_3.2'] },
     { group: 'Anhang (Gesamt)', class: 'anhang_global', columns: ['Anhang_Global'] },
     { group: 'GPS-Daten', class: 'special', columns: ['Koordinaten'] },
@@ -1168,7 +1168,7 @@ function renderTable() {
             
             let label = c.includes('_') ? c.split('_')[0] : c;
             label = label.replace(' [Ω]', '').replace(' [Ωm]', ''); // Remove units to save space
-            if (c === 'Sprachsteuerung') {
+            if (c === 'Sprache_0.8' || c === 'Sprache_1.6') {
                 sh.innerHTML = '<i class="fas fa-microphone" title="Sprachsteuerung" style="cursor:help;"></i>';
                 sh.style.width = '36px';
                 sh.style.minWidth = '36px';
@@ -1313,21 +1313,36 @@ function renderTableBody() {
                             td.style.color = 'var(--text-muted)';
                         }
                     }
-                } else if (col === 'Sprachsteuerung') {
+                } else if (col === 'Sprache_0.8') {
                     td.style.textAlign = 'center';
-                    const micBtn = document.createElement('button');
-                    micBtn.className = 'row-mic-btn';
-                    micBtn.dataset.row = idx;
-                    micBtn.title = 'Zeilen-Diktat (0.8m & 1.6m)';
-                    micBtn.style.cssText = 'background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:13px;padding:2px 4px;';
-                    micBtn.innerHTML = '<i class="fas fa-microphone"></i>';
-                    micBtn.addEventListener('click', (e) => {
+                    const micBtn08 = document.createElement('button');
+                    micBtn08.className = 'row-mic-btn';
+                    micBtn08.dataset.row = idx;
+                    micBtn08.title = 'Zeilen-Diktat (0.8m)';
+                    micBtn08.style.cssText = 'background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:13px;padding:2px 4px;';
+                    micBtn08.innerHTML = '<i class="fas fa-microphone"></i>';
+                    micBtn08.addEventListener('click', (e) => {
                         e.stopPropagation();
                         if (typeof startRowVoiceDictation === 'function') {
-                            startRowVoiceDictation(idx, micBtn);
+                            startRowVoiceDictation(idx, micBtn08, '0.8');
                         }
                     });
-                    td.appendChild(micBtn);
+                    td.appendChild(micBtn08);
+                } else if (col === 'Sprache_1.6') {
+                    td.style.textAlign = 'center';
+                    const micBtn16 = document.createElement('button');
+                    micBtn16.className = 'row-mic-btn';
+                    micBtn16.dataset.row = idx;
+                    micBtn16.title = 'Zeilen-Diktat (1.6m)';
+                    micBtn16.style.cssText = 'background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:13px;padding:2px 4px;';
+                    micBtn16.innerHTML = '<i class="fas fa-microphone"></i>';
+                    micBtn16.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        if (typeof startRowVoiceDictation === 'function') {
+                            startRowVoiceDictation(idx, micBtn16, '1.6');
+                        }
+                    });
+                    td.appendChild(micBtn16);
                 } else {
                     const inp = document.createElement('input');
                     inp.type = 'text';
@@ -3559,8 +3574,10 @@ async function exportExcel(opts) {
             if (isDepth) {
                 if (!depthsToExport.includes(g.class)) return;
                 const visibleCols = g.columns.filter(col => !AppState.hiddenColumns.has(col));
-                if (visibleCols.length === 0) return;
-                visibleCols.forEach((col, cIdx) => {
+                // Do not export Sprache buttons
+                const exportCols = visibleCols.filter(c => c !== 'Sprache_0.8' && c !== 'Sprache_1.6');
+                if (exportCols.length === 0) return;
+                exportCols.forEach((col, cIdx) => {
                     h1.push(cIdx === 0 ? g.group : '');
                     let label = col.split('_')[0];
                     if (label === 'MW [Ωm]') label = 'Mittelwert [Ωm]';
@@ -3578,7 +3595,7 @@ async function exportExcel(opts) {
                     });
                 });
             } else if (g.class === 'basis') {
-                const visibleCols = g.columns.filter(col => !AppState.hiddenColumns.has(col) && col !== 'Sprachsteuerung');
+                const visibleCols = g.columns.filter(col => !AppState.hiddenColumns.has(col));
                 visibleCols.forEach(col => {
                     h1.push(col);
                     h2.push('');
@@ -5880,26 +5897,25 @@ let _voiceActive = false;
 let _voiceRowIdx = -1;
 let _voiceColIdx = 0;
 let _voiceMicBtn = null;
+let _voiceCurrentSequence = [];
 
-// The sequence of columns to fill, in order: 0.8m (R1,R2,R3) then 1.6m (R1,R2,R3)
-const VOICE_SEQUENCE = [
-    'R1 [Ω]_0.8', 'R2 [Ω]_0.8', 'R3 [Ω]_0.8',
-    'R1 [Ω]_1.6', 'R2 [Ω]_1.6', 'R3 [Ω]_1.6'
-];
-
-function startRowVoiceDictation(rowIdx, micBtn) {
+function startRowVoiceDictation(rowIdx, micBtn, depth) {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
         showToast('Spracheingabe nur in Chrome/Edge verfügbar');
         return;
     }
 
-    // If already listening on this row, stop
-    if (_voiceActive && _voiceRowIdx === rowIdx) {
+    const seq = depth === '1.6' 
+        ? ['R1 [Ω]_1.6', 'R2 [Ω]_1.6', 'R3 [Ω]_1.6']
+        : ['R1 [Ω]_0.8', 'R2 [Ω]_0.8', 'R3 [Ω]_0.8'];
+
+    // If already listening on this row AND this specific button, stop
+    if (_voiceActive && _voiceRowIdx === rowIdx && _voiceMicBtn === micBtn) {
         stopRowVoiceDictation();
         return;
     }
 
-    // If listening on another row, stop that first
+    // If listening on another row/button, stop that first
     if (_voiceActive) stopRowVoiceDictation();
 
     if (!AppState.data[rowIdx]) {
@@ -5909,21 +5925,22 @@ function startRowVoiceDictation(rowIdx, micBtn) {
 
     _voiceRowIdx = rowIdx;
     _voiceMicBtn = micBtn;
+    _voiceCurrentSequence = seq;
 
-    // Determine which column to fill based on selected cell, default R1/0.8
-    let targetCol = 'R1 [Ω]_0.8';
+    // Determine which column to fill based on selected cell, default to seq[0]
+    let targetCol = seq[0];
     if (AppState.selectedCell) {
         const selCol = AppState.selectedCell.split('-').slice(1).join('-');
         if (selCol && selCol.includes('[Ω]')) {
             targetCol = selCol;
         }
     }
-    const seqIdx = VOICE_SEQUENCE.indexOf(targetCol);
+    const seqIdx = _voiceCurrentSequence.indexOf(targetCol);
     if (seqIdx >= 0) {
         _voiceColIdx = seqIdx;
     } else {
         _voiceColIdx = 0;
-        targetCol = VOICE_SEQUENCE[0];
+        targetCol = _voiceCurrentSequence[0];
     }
     window._voiceTargetCol = targetCol;
 
@@ -5971,9 +5988,9 @@ function startRowVoiceDictation(rowIdx, micBtn) {
         showToast('✓ Zeile ' + (_voiceRowIdx + 1) + ' ' + label + ' = ' + value);
 
         // Advance to next column in sequence
-        if (_voiceColIdx < VOICE_SEQUENCE.length - 1) {
+        if (_voiceColIdx < _voiceCurrentSequence.length - 1) {
             _voiceColIdx++;
-            const nextCol = VOICE_SEQUENCE[_voiceColIdx];
+            const nextCol = _voiceCurrentSequence[_voiceColIdx];
             window._voiceTargetCol = nextCol;
             updateVoiceHUD(targetCol, value);
         } else {
