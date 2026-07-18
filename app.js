@@ -48,6 +48,7 @@ const AppState = {
     activeColor: '#e879f9',
     liveFollow: false,
     newCols: new Set(),
+    newColsPlacement: [],
     filters: { 'Kennzeichen': '' },
     userMarker: null,
     drawItems: null,
@@ -80,6 +81,49 @@ function getLibrarySafe() {
     } catch (e) {
         console.error('messstellen_library corrupted:', e);
         return {};
+    }
+}
+
+function restoreNewColumns(project) {
+    // 1. Remove any old custom columns from TABLE_STRUCTURE to prevent duplicates
+    TABLE_STRUCTURE.forEach(g => {
+        g.columns = g.columns.filter(c => !AppState.newCols.has(c));
+    });
+
+    AppState.newCols = new Set(project.newCols || []);
+    AppState.newColsPlacement = project.newColsPlacement || [];
+
+    if (AppState.newColsPlacement.length > 0) {
+        // New format: we know exactly where each column goes
+        AppState.newColsPlacement.forEach(placement => {
+            let targetGroup = TABLE_STRUCTURE.find(g => g.group === placement.group);
+            if (!targetGroup) {
+                targetGroup = { group: placement.group, class: 'zusatz', columns: [] };
+                TABLE_STRUCTURE.push(targetGroup);
+            }
+            
+            // Avoid duplicates
+            if (targetGroup.columns.includes(placement.name)) return;
+
+            let insertIdx = targetGroup.columns.length;
+            if (placement.afterCol) {
+                const afterIdx = targetGroup.columns.indexOf(placement.afterCol);
+                if (afterIdx !== -1) {
+                    insertIdx = afterIdx + 1;
+                }
+            }
+            targetGroup.columns.splice(insertIdx, 0, placement.name);
+        });
+    } else if (AppState.newCols.size > 0) {
+        // Old format fallback: just dump them into "Zusatz" at the end
+        let zusatzGroup = TABLE_STRUCTURE.find(g => g.group === 'Zusatz');
+        if (!zusatzGroup) {
+            zusatzGroup = { group: 'Zusatz', class: 'zusatz', columns: [] };
+            TABLE_STRUCTURE.push(zusatzGroup);
+        }
+        AppState.newCols.forEach(col => { 
+            if (!zusatzGroup.columns.includes(col)) zusatzGroup.columns.push(col); 
+        });
     }
 }
 
@@ -581,6 +625,10 @@ async function openProjectForReview(project) {
                 if (mergedRow[key] === '__IMAGE_REF__' && localRow[key] && localRow[key].startsWith('data:image')) {
                     mergedRow[key] = localRow[key];
                 }
+                // Also accept IDB placeholder from local copy — it will be resolved below
+                if (mergedRow[key] === '__IMAGE_REF__' && localRow[key] === '__IDB_PHOTO__') {
+                    mergedRow[key] = '__IDB_PHOTO__';
+                }
             });
             return mergedRow;
         });
@@ -597,15 +645,7 @@ async function openProjectForReview(project) {
         cellFormatting = (localProject && localProject.cellFormatting) || {};
     }
 
-    if (project.newCols) {
-        AppState.newCols = new Set(project.newCols);
-        let zusatzGroup = TABLE_STRUCTURE.find(g => g.group === 'Zusatz');
-        if (!zusatzGroup) {
-            zusatzGroup = { group: 'Zusatz', class: 'zusatz', columns: [] };
-            TABLE_STRUCTURE.push(zusatzGroup);
-        }
-        AppState.newCols.forEach(col => { if (!zusatzGroup.columns.includes(col)) zusatzGroup.columns.push(col); });
-    }
+    restoreNewColumns(project);
 
     // Store map data for restoreMapDrawings
     if (project.mapData || project.starData) {
@@ -616,6 +656,7 @@ async function openProjectForReview(project) {
         lib[pName].name = pName;
         lib[pName].hiddenMapColors = project.hiddenMapColors || [];
         lib[pName].newCols = project.newCols || [];
+        lib[pName].newColsPlacement = project.newColsPlacement || [];
         localStorage.setItem('messstellen_library', JSON.stringify(lib));
         localStorage.setItem('current_project_id', pName);
     }
@@ -627,6 +668,19 @@ async function openProjectForReview(project) {
     if (mainApp) mainApp.style.display = 'flex';
 
     renderTable();
+
+    // ── Restore photos from IndexedDB (same as in loadFromStorage) ──
+    if (typeof PhotoStore !== 'undefined' && PhotoStore.isAvailable()) {
+        var hasIdbRefs = AppState.data.some(function (row) {
+            return Object.values(row).some(function (v) { return v === PhotoStore.IDB_REF; });
+        });
+        if (hasIdbRefs) {
+            PhotoStore.restorePhotos(pName, AppState.data)
+                .then(function () { renderTable(); })
+                .catch(function (err) { console.error('PhotoStore: restore failed', err); });
+        }
+    }
+
     startProjectCloudSync(pName);
 
     // If submitted → open review detail immediately
@@ -792,7 +846,7 @@ function initUI() {
     on('btnStartBlank', 'click', () => {
         closeMap();
         AppState.data = [];
-        AppState.newCols = new Set();
+        restoreNewColumns({});
         const nameInput = $('projectName');
         if (nameInput) nameInput.value = '';
         renderTable();
@@ -903,6 +957,14 @@ function initUI() {
         pushUndo();
         targetGroup.columns.splice(insertIdx, 0, colName);
         AppState.newCols.add(colName);
+        
+        const afterColName = insertIdx > 0 ? targetGroup.columns[insertIdx - 1] : null;
+        AppState.newColsPlacement.push({
+            name: colName,
+            group: targetGroup.group,
+            afterCol: afterColName
+        });
+
         AppState.data.forEach(row => { if (row[colName] === undefined) row[colName] = ''; });
         renderTable();
         saveToStorage();
@@ -922,6 +984,7 @@ function initUI() {
             if (idx !== -1) { g.columns.splice(idx, 1); break; }
         }
         AppState.newCols.delete(colToDelete);
+        AppState.newColsPlacement = AppState.newColsPlacement.filter(p => p.name !== colToDelete);
         renderTable();
         saveToStorage();
         showToast(`Spalte "${colToDelete}" gelöscht`);
@@ -1018,7 +1081,7 @@ function initUI() {
 // ─── FILE HANDLING ───
 function handleFileUpload(file) {
     AppState.data = [];
-    AppState.newCols.clear();
+    restoreNewColumns({});
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -1259,6 +1322,9 @@ function renderTableBody() {
                         // failed and this device never had the original file — there
                         // is genuinely nothing to display or open here.
                         td.innerHTML = '<span style="color:var(--text-muted);font-size:11px;" title="Foto wurde in die Cloud hochgeladen, ist aber auf diesem Gerät nicht verfügbar"><i class="fas fa-cloud-slash"></i> nicht verfügbar</span>';
+                    } else if (originalRow[col] === '__IDB_PHOTO__') {
+                        // Photo is being restored from IndexedDB — show spinner
+                        td.innerHTML = '<span style="color:var(--text-muted);font-size:11px;" title="Foto wird geladen…"><i class="fas fa-spinner fa-spin"></i></span>';
                     } else if (originalRow[col]) {
                         const imgContainer = document.createElement('div');
                         imgContainer.className = 'table-img-container';
@@ -1601,6 +1667,7 @@ function saveToStorage() {
             timestamp: Date.now(),
             hiddenMapColors: Array.from(AppState.hiddenMapColors),
             newCols: Array.from(AppState.newCols),
+            newColsPlacement: AppState.newColsPlacement,
             // Cell formatting (bold/italic/underline/bg-color) lived only in the
             // page-global `cellFormatting` object and was never saved, so it
             // silently vanished on reload or when switching projects. Persist it
@@ -1608,67 +1675,41 @@ function saveToStorage() {
             cellFormatting: (typeof cellFormatting !== 'undefined') ? cellFormatting : (existingProject.cellFormatting || {})
         };
 
-        library[pName] = project;
-        
-        try {
-            localStorage.setItem('messstellen_library', JSON.stringify(library));
-        } catch (quotaErr) {
-            if (quotaErr.name === 'QuotaExceededError' || quotaErr.code === 22) {
-                // Try to free space by removing oldest OTHER projects first
-                var names = Object.keys(library).filter(function(n) { return n !== pName; });
-                names.sort(function(a, b) { return (library[a].timestamp || 0) - (library[b].timestamp || 0); });
-                var saved = false;
-                while (names.length > 0) {
-                    var oldest = names.shift();
-                    delete library[oldest];
+        // ── IndexedDB photo offloading ──
+        // Photos (base64 data-URLs) are the main reason localStorage runs out of
+        // space.  If IndexedDB is available we move ALL photos there and only keep
+        // a tiny placeholder string in localStorage, effectively giving us 100s of
+        // MB instead of 5 MB.
+        if (typeof PhotoStore !== 'undefined' && PhotoStore.isAvailable()) {
+            // extractAndSavePhotos() is async — it returns a Promise that resolves
+            // to a deep-copy of the data array with data:image values replaced by
+            // the placeholder string PhotoStore.IDB_REF ('__IDB_PHOTO__').
+            PhotoStore.extractAndSavePhotos(pName, project.data)
+                .then(function (strippedData) {
+                    var lsProject = JSON.parse(JSON.stringify(project));
+                    lsProject.data = strippedData;
+                    library[pName] = lsProject;
                     try {
                         localStorage.setItem('messstellen_library', JSON.stringify(library));
-                        showToast('Speicher voll — Projekt "' + oldest + '" gelöscht');
-                        saved = true;
-                        break;
-                    } catch (e2) { continue; }
-                }
-
-                // Most field users only have ONE project open, so there is often
-                // nothing else to delete — the loop above never runs and, before
-                // this fix, the ENTIRE save (photos AND the measurement values
-                // typed since the last successful save) was silently dropped.
-                // Fallback: save a copy of THIS project with its embedded photos
-                // stripped out, so the actual measurement data isn't lost too.
-                // The photos stay visible on screen (AppState.data is untouched,
-                // only a deep copy is modified here) until space is freed and a
-                // save with images succeeds again.
-                if (!saved) {
-                    try {
-                        var strippedProject = JSON.parse(JSON.stringify(project));
-                        var strippedAny = false;
-                        (strippedProject.data || []).forEach(function(row) {
-                            Object.keys(row).forEach(function(k) {
-                                if (typeof row[k] === 'string' && row[k].startsWith('data:image')) {
-                                    row[k] = '';
-                                    strippedAny = true;
-                                }
-                            });
-                        });
-                        library[pName] = strippedProject;
-                        localStorage.setItem('messstellen_library', JSON.stringify(library));
-                        saved = true;
-                        if (strippedAny) {
-                            showToast('⚠️ Speicher voll — Messwerte gespeichert, aber Fotos konnten NICHT gespeichert werden! Bitte alte Fotos löschen, dann erneut speichern.', 8000);
+                    } catch (quotaErr) {
+                        // Even with photos in IDB, measurement + map data could theoretically
+                        // overflow — fall back to stripping remaining images just in case.
+                        if (quotaErr.name === 'QuotaExceededError' || quotaErr.code === 22) {
+                            console.warn('localStorage quota hit even with IDB offload:', quotaErr);
+                            showToast('⚠️ Speicher voll — Messwerte wurden gespeichert, Fotos in separatem Speicher.', 5000);
                         } else {
-                            showToast('⚠️ Speicher voll — bitte Fotos oder alte Projekte löschen.', 6000);
+                            throw quotaErr;
                         }
-                    } catch (e3) {
-                        console.error('Save still failing even without images:', e3);
                     }
-                }
-
-                if (!saved) {
-                    showToast('❌ Speicher voll! Speichern fehlgeschlagen — bitte Fotos/alte Projekte löschen und erneut versuchen.', 8000);
-                }
-            } else {
-                throw quotaErr;
-            }
+                })
+                .catch(function (idbErr) {
+                    console.error('PhotoStore save failed, falling back to localStorage:', idbErr);
+                    // Fallback: try old-style full save to localStorage
+                    _saveProjectToLocalStorageFallback(library, pName, project);
+                });
+        } else {
+            // No IndexedDB — use the original localStorage-only path
+            _saveProjectToLocalStorageFallback(library, pName, project);
         }
         
         localStorage.setItem('current_project_id', pName);
@@ -1682,6 +1723,63 @@ function saveToStorage() {
     } catch (err) {
         console.error('Save error:', err);
         showToast('Speichern fehlgeschlagen: ' + err.message);
+    }
+}
+
+// Fallback: save project entirely in localStorage (original approach, used
+// when IndexedDB is unavailable or when it fails).
+function _saveProjectToLocalStorageFallback(library, pName, project) {
+    library[pName] = project;
+    try {
+        localStorage.setItem('messstellen_library', JSON.stringify(library));
+    } catch (quotaErr) {
+        if (quotaErr.name === 'QuotaExceededError' || quotaErr.code === 22) {
+            // Try to free space by removing oldest OTHER projects first
+            var names = Object.keys(library).filter(function(n) { return n !== pName; });
+            names.sort(function(a, b) { return (library[a].timestamp || 0) - (library[b].timestamp || 0); });
+            var saved = false;
+            while (names.length > 0) {
+                var oldest = names.shift();
+                delete library[oldest];
+                try {
+                    localStorage.setItem('messstellen_library', JSON.stringify(library));
+                    showToast('Speicher voll — Projekt "' + oldest + '" gelöscht');
+                    saved = true;
+                    break;
+                } catch (e2) { continue; }
+            }
+
+            if (!saved) {
+                try {
+                    var strippedProject = JSON.parse(JSON.stringify(project));
+                    var strippedAny = false;
+                    (strippedProject.data || []).forEach(function(row) {
+                        Object.keys(row).forEach(function(k) {
+                            if (typeof row[k] === 'string' && row[k].startsWith('data:image')) {
+                                row[k] = '';
+                                strippedAny = true;
+                            }
+                        });
+                    });
+                    library[pName] = strippedProject;
+                    localStorage.setItem('messstellen_library', JSON.stringify(library));
+                    saved = true;
+                    if (strippedAny) {
+                        showToast('⚠️ Speicher voll — Messwerte gespeichert, aber Fotos konnten NICHT gespeichert werden! Bitte alte Fotos löschen, dann erneut speichern.', 8000);
+                    } else {
+                        showToast('⚠️ Speicher voll — bitte Fotos oder alte Projekte löschen.', 6000);
+                    }
+                } catch (e3) {
+                    console.error('Save still failing even without images:', e3);
+                }
+            }
+
+            if (!saved) {
+                showToast('❌ Speicher voll! Speichern fehlgeschlagen — bitte Fotos/alte Projekte löschen und erneut versuchen.', 8000);
+            }
+        } else {
+            throw quotaErr;
+        }
     }
 }
 
@@ -1710,20 +1808,29 @@ function loadFromStorage() {
         if (nameInput) nameInput.value = project.name;
 
         AppState.hiddenMapColors = new Set(project.hiddenMapColors || []);
-        AppState.newCols = new Set(project.newCols || []);
         if (typeof cellFormatting !== 'undefined') {
             cellFormatting = project.cellFormatting || {};
         }
+        restoreNewColumns(project);
 
-        if (AppState.newCols.size > 0) {
-            let zusatzGroup = TABLE_STRUCTURE.find(g => g.group === 'Zusatz');
-            if (!zusatzGroup) {
-                zusatzGroup = { group: 'Zusatz', class: 'zusatz', columns: [] };
-                TABLE_STRUCTURE.push(zusatzGroup);
-            }
-            AppState.newCols.forEach(colName => {
-                if (!zusatzGroup.columns.includes(colName)) zusatzGroup.columns.push(colName);
+        // ── Restore photos from IndexedDB ──
+        // After loading measurement data, check if any cells contain the
+        // IDB placeholder.  If so, asynchronously fetch the real base64 data
+        // from IndexedDB and re-render the table once done.
+        if (typeof PhotoStore !== 'undefined' && PhotoStore.isAvailable()) {
+            var hasIdbRefs = AppState.data.some(function (row) {
+                return Object.values(row).some(function (v) { return v === PhotoStore.IDB_REF; });
             });
+            if (hasIdbRefs) {
+                PhotoStore.restorePhotos(pName, AppState.data)
+                    .then(function () {
+                        renderTable();
+                        console.log('PhotoStore: photos restored from IndexedDB');
+                    })
+                    .catch(function (err) {
+                        console.error('PhotoStore: restore failed', err);
+                    });
+            }
         }
     }
 }
@@ -3260,7 +3367,7 @@ function saveFinalSnip() {
     }
 
     try {
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.55);
         AppState.data[targetIdx][targetCol] = dataUrl;
 
         // ── AUTO-KOORDINATEN: Save current GPS position to the same row ──
@@ -3427,7 +3534,7 @@ function renderProjectList() {
                     if (currentId === name) {
                         localStorage.removeItem('current_project_id');
                         AppState.data = [];
-                        AppState.newCols = new Set();
+                        restoreNewColumns({});
                         const nameInput = $('projectName');
                         if (nameInput) nameInput.value = '';
                         renderTable();
@@ -3456,10 +3563,10 @@ function loadProject(name) {
         localStorage.setItem('current_project_id', name);
         AppState.data = p.data || [];
         AppState.hiddenMapColors = new Set(p.hiddenMapColors || []);
-        AppState.newCols = new Set(p.newCols || []);
         if (typeof cellFormatting !== 'undefined') {
             cellFormatting = p.cellFormatting || {};
         }
+        restoreNewColumns(p);
         const nameInput = $('projectName');
         if (nameInput) nameInput.value = p.name;
         renderTable();
@@ -4892,7 +4999,7 @@ function initImageEditorCanvas(imgSrc, _retryWithoutCors) {
     img.onload = () => {
         let w = img.width;
         let h = img.height;
-        const maxDim = 1280; // Compress high-res camera photos to 1280px to save storage
+        const maxDim = 800; // Compress high-res camera photos to 800px to save storage
         if (w > maxDim || h > maxDim) {
             if (w > h) { h = Math.floor((h/w)*maxDim); w = maxDim; }
             else { w = Math.floor((w/h)*maxDim); h = maxDim; }
@@ -5388,7 +5495,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let dataUrl;
             try {
-                dataUrl = tempCanvas.toDataURL('image/jpeg', 0.80); // Compress quality to 80% to fit localStorage
+                dataUrl = tempCanvas.toDataURL('image/jpeg', 0.55); // Compress quality to fit localStorage
             } catch (e) {
                 // "Tainted canvases may not be exported" — this photo was loaded
                 // from a remote Storage URL that isn't CORS-enabled, so the pixel
@@ -5487,7 +5594,8 @@ async function handleSubmitForReview() {
             data: AppState.data,
             mapData: layers && layers.drawItems ? layers.drawItems.toGeoJSON() : null,
             hiddenMapColors: Array.from(AppState.hiddenMapColors),
-            newCols: Array.from(AppState.newCols)
+            newCols: Array.from(AppState.newCols),
+            newColsPlacement: AppState.newColsPlacement
         };
 
         try {
@@ -5588,15 +5696,7 @@ function applyIncomingCloudData(pName, data, _attempt) {
 
     AppState.data = data.data;
     // Merge new columns if any
-    if (data.newCols) {
-        AppState.newCols = new Set(data.newCols);
-        let zusatzGroup = TABLE_STRUCTURE.find(g => g.group === 'Zusatz');
-        if (!zusatzGroup) {
-            zusatzGroup = { group: 'Zusatz', class: 'zusatz', columns: [] };
-            TABLE_STRUCTURE.push(zusatzGroup);
-        }
-        AppState.newCols.forEach(col => { if (!zusatzGroup.columns.includes(col)) zusatzGroup.columns.push(col); });
-    }
+    restoreNewColumns(data);
 
     // If there's map data or star data, save/restore it in the library too
     const lib = getLibrarySafe();
@@ -5607,6 +5707,7 @@ function applyIncomingCloudData(pName, data, _attempt) {
     lib[pName].starData = data.starData || [];
     lib[pName].hiddenMapColors = data.hiddenMapColors || [];
     lib[pName].newCols = data.newCols || [];
+    lib[pName].newColsPlacement = data.newColsPlacement || [];
     lib[pName].timestamp = Date.now();
     lib[pName].reviewStatus = data.reviewStatus || 'draft';
     localStorage.setItem('messstellen_library', JSON.stringify(lib));
