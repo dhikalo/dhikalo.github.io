@@ -1,4 +1,4 @@
-const CACHE_NAME = 'messstellen-v39';
+const CACHE_NAME = 'messstellen-v42';
 const TILE_CACHE = 'messstellen-tiles-v2';
 
 // Core app shell — always cache these

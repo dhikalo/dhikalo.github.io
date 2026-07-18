@@ -85,12 +85,18 @@ function getLibrarySafe() {
 }
 
 function restoreNewColumns(project) {
+    // 0. Ensure newly promoted columns are no longer treated as custom columns
+    const newlyPromoted = ['Kommentar', 'Bodentyp', 'bodentype', 'Bodentype', 'Bodentyp '];
+    let pNewCols = project.newCols || [];
+    pNewCols = pNewCols.filter(c => !newlyPromoted.includes(c));
+    
+    AppState.newCols = new Set(pNewCols);
+
     // 1. Remove any old custom columns from TABLE_STRUCTURE to prevent duplicates
     TABLE_STRUCTURE.forEach(g => {
         g.columns = g.columns.filter(c => !AppState.newCols.has(c));
     });
 
-    AppState.newCols = new Set(project.newCols || []);
     AppState.newColsPlacement = project.newColsPlacement || [];
 
     if (AppState.newColsPlacement.length > 0) {
@@ -3475,7 +3481,7 @@ function openColManager() {
         grid.appendChild(item);
 
         if (g.class === 'basis') {
-            const subCols = ['Kennzeichen', 'Alt-Kz.', 'Datum'];
+            const subCols = ['Kennzeichen', 'Alt-Kz.', 'Meter [m]', 'Kommentar', 'Bodentyp', 'Datum'];
             subCols.forEach(col => {
                 const isColVisible = !AppState.hiddenColumns.has(col);
                 const subItem = document.createElement('div');
