@@ -1,4 +1,4 @@
-﻿/* ============================================
+/* ============================================
    FORMATTING MODULE - Cell Styling & Colors
    ============================================ */
 
@@ -48,7 +48,9 @@ function toggleFormat(type) {
         if (!cellFormatting[key]) cellFormatting[key] = {};
         cellFormatting[key][type] = !cellFormatting[key][type];
 
-        const [row, col] = key.split('-');
+        const sepIdx = key.indexOf('-');
+        const row = key.substring(0, sepIdx);
+        const col = key.substring(sepIdx + 1);
         const input = document.querySelector(`input[data-row="${row}"][data-col="${col}"]`);
         if (input) {
             applyFormattingToCell(input, cellFormatting[key]);
@@ -63,7 +65,9 @@ function applyBgColor(color) {
         if (!cellFormatting[key]) cellFormatting[key] = {};
         cellFormatting[key].bgColor = color;
 
-        const [row, col] = key.split('-');
+        const sepIdx = key.indexOf('-');
+        const row = key.substring(0, sepIdx);
+        const col = key.substring(sepIdx + 1);
         const input = document.querySelector(`input[data-row="${row}"][data-col="${col}"]`);
         if (input) {
             input.style.backgroundColor = color;
@@ -88,7 +92,9 @@ function clearFormatting() {
     selectedCells.forEach(key => {
         delete cellFormatting[key];
 
-        const [row, col] = key.split('-');
+        const sepIdx = key.indexOf('-');
+        const row = key.substring(0, sepIdx);
+        const col = key.substring(sepIdx + 1);
         const input = document.querySelector(`input[data-row="${row}"][data-col="${col}"]`);
         if (input) {
             input.style.fontWeight = '';

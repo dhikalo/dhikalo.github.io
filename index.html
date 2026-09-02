@@ -377,17 +377,17 @@
             <div class="export-options">
                 <label class="export-option depth-08-bg">
                     <input type="checkbox" id="exportChk08" checked>
-                    <span class="depth-dot" style="background:#ff00ff;"></span>
+                    <span class="depth-dot" style="background:#00e5ff;"></span>
                     <span>0.8 m</span>
                 </label>
                 <label class="export-option depth-16-bg">
                     <input type="checkbox" id="exportChk16" checked>
-                    <span class="depth-dot" style="background:#ffff00;"></span>
+                    <span class="depth-dot" style="background:#d97706;"></span>
                     <span>1.6 m</span>
                 </label>
                 <label class="export-option depth-32-bg">
                     <input type="checkbox" id="exportChk32" checked>
-                    <span class="depth-dot" style="background:#00ffff;"></span>
+                    <span class="depth-dot" style="background:#ff2d95;"></span>
                     <span>3.2 m</span>
                 </label>
             </div>
@@ -431,6 +431,7 @@
 
     <!-- Image Editor Camera Modal -->
     <input type="file" id="cameraInput" accept="image/*" capture="camera" style="display:none;">
+    <input type="file" id="photoUploadInput" accept="image/*" style="display:none;">
     
     <div id="imageEditorModal" class="modal-overlay" style="display:none;z-index:600000;">
         <div class="modal-content modal-lg">
@@ -443,12 +444,17 @@
                     <button class="toolbar-btn" id="toolLine" title="Linie"><i class="fas fa-slash"></i></button>
                     <button class="toolbar-btn" id="toolCircle" title="Kreis"><i class="far fa-circle"></i></button>
                     <button class="toolbar-btn" id="toolText" title="Text"><i class="fas fa-font"></i></button>
+                    <button class="toolbar-btn" id="toolInpaintBrush" title="Magischer Radiergummi (Inpaint)"><i class="fas fa-magic"></i></button>
                     <button class="toolbar-btn" id="toolMove" title="Verschieben"><i class="fas fa-arrows-alt"></i></button>
                     <button class="toolbar-btn" id="toolDelete" title="Löschen" style="color:var(--danger);"><i class="fas fa-trash-alt"></i></button>
+                    <button class="modal-btn primary" id="btnApplyInpaint" style="display:none; padding: 4px 10px; font-size: 12px;"><i class="fas fa-check"></i> Radieren Anwenden</button>
                 </div>
             </div>
-            <div class="snip-editor" style="background:#222; text-align:center; overflow:auto;">
-                <canvas id="imgEditorCanvas"></canvas>
+            <div class="snip-editor" style="background:#222; text-align:center; overflow:auto; position: relative; display: flex; justify-content: center; align-items: flex-start; padding: 20px;">
+                <div style="position: relative; display: inline-block;">
+                    <canvas id="imgEditorCanvas" style="display: block;"></canvas>
+                    <canvas id="imgEditorMask" style="position: absolute; top: 0; left: 0; pointer-events: none; opacity: 0.5;"></canvas>
+                </div>
             </div>
             <div class="editor-info-bar" style="font-size: 11px; color: var(--text-secondary); padding: 8px 16px; background: rgba(0,0,0,0.2); text-align: center; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
                 <i class="fas fa-info-circle"></i> Tipp: Verwenden Sie "Verschieben", um Elemente zu bewegen/ändern. Doppelklick auf Text zum Ändern.

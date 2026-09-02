@@ -151,17 +151,56 @@ async function saveToCloud(projectName, projectData) {
         const cloudData = await Promise.all(projectData.data.map(async (row, rowIdx) => {
             const cleanRow = {};
             for (const [key, val] of Object.entries(row)) {
-                if (typeof val === 'string' && val.startsWith('data:image') && val.length > 50000) {
+                // Handle multi-photo arrays (e.g. MK-Bild) — each entry treated the same as a single-photo cell
+                if (Array.isArray(val)) {
+                    const outArr = [];
+                    for (let i = 0; i < val.length; i++) {
+                        const item = val[i];
+                        if (typeof item === 'string' && item.startsWith('data:image') && item.length > 50000) {
+                            try {
+                                const url = await uploadPhotoToStorage(projectName, rowIdx, key + '#' + i, item);
+                                outArr.push(url || '__IMAGE_REF__');
+                            } catch (e) {
+                                outArr.push('__IMAGE_REF__');
+                            }
+                        } else if (typeof item === 'string' && item.startsWith('https://firebasestorage')) {
+                            outArr.push(item);
+                        } else if (item === '__IDB_PHOTO__') {
+                            outArr.push('__IMAGE_REF__');
+                        } else if (typeof item === 'string' && item.startsWith('data:image')) {
+                            // Small inline image — still upload to Storage to keep Firestore doc lean
+                            try {
+                                const url = await uploadPhotoToStorage(projectName, rowIdx, key + '#' + i, item);
+                                outArr.push(url || '__IMAGE_REF__');
+                            } catch (e) {
+                                outArr.push('__IMAGE_REF__');
+                            }
+                        } else if (item) {
+                            outArr.push(item);
+                        }
+                    }
+                    cleanRow[key] = outArr;
+                } else if (typeof val === 'string' && val.startsWith('data:image') && val.length > 50000) {
                     // Upload to Storage and store the download URL instead
                     try {
                         const url = await uploadPhotoToStorage(projectName, rowIdx, key, val);
                         cleanRow[key] = url || '__IMAGE_REF__';
+                        // Store URL back in memory so subsequent saves don't re-upload
+                        if (url) {
+                            row[key] = url;
+                        }
                     } catch (e) {
                         cleanRow[key] = '__IMAGE_REF__';
                     }
                 } else if (typeof val === 'string' && val.startsWith('https://firebasestorage')) {
                     // Already a Storage URL — keep as-is
                     cleanRow[key] = val;
+                } else if (val === '__IDB_PHOTO__') {
+                    // Local IndexedDB placeholder — don't send to cloud
+                    cleanRow[key] = '__IMAGE_REF__';
+                } else if (typeof val === 'string' && val.startsWith('data:image')) {
+                    // Small image (< 50KB) — skip sending inline to Firestore to avoid bloat
+                    cleanRow[key] = '__IMAGE_REF__';
                 } else {
                     cleanRow[key] = val;
                 }
@@ -430,11 +469,12 @@ async function uploadPhotoToStorage(projectName, rowIndex, colName, base64DataUr
         const response = await fetch(base64DataUrl);
         const blob = await response.blob();
 
-        // Build a storage path: projects/<projectId>/images/<rowIndex>_<colName>_<timestamp>.jpg
+        // Build a STABLE storage path so re-uploads overwrite the same file
+        // instead of creating duplicates (old path had Date.now() → new file each save)
         const ext = blob.type.includes('png') ? 'png' : 'jpg';
         const safeName = sanitizeDocId(projectName);
         const safeCol = colName.replace(/[^a-zA-Z0-9_]/g, '_');
-        const path = `projects/${safeName}/images/${rowIndex}_${safeCol}_${Date.now()}.${ext}`;
+        const path = `projects/${safeName}/images/${rowIndex}_${safeCol}.${ext}`;
 
         const storageRef = CloudState.storage.ref(path);
 
@@ -521,6 +561,104 @@ function isFirebaseConfigured() {
 
 // Export for use in app.js
 window.CloudState = CloudState;
+// ─── CLEANUP DUPLICATE PHOTOS IN FIREBASE STORAGE ───
+// Old upload code used Date.now() in filenames, creating a new file on every save.
+// This function finds all timestamped duplicates, keeps the newest per group, and deletes the rest.
+async function cleanupDuplicatePhotos() {
+    if (!CloudState.initialized || !CloudState.storage) {
+        if (typeof showToast === 'function') showToast('❌ Firebase Storage nicht initialisiert');
+        console.error('Firebase Storage not initialized');
+        return 0;
+    }
+
+    if (typeof showToast === 'function') showToast('🔍 Suche nach doppelten Fotos…');
+    console.log('Starting duplicate photo cleanup...');
+
+    const rootRef = CloudState.storage.ref('projects');
+    let projectFolders;
+    try {
+        projectFolders = await rootRef.listAll();
+    } catch (e) {
+        console.error('Cannot list project folders:', e);
+        if (typeof showToast === 'function') showToast('❌ Fehler beim Lesen der Ordner');
+        return 0;
+    }
+
+    let totalDeleted = 0;
+    let totalKept = 0;
+
+    // Regex: matches filenames like "0_Anhang_Global_1785151118046.jpg"
+    // Captures: [1] = base name (e.g. "0_Anhang_Global"), [2] = timestamp, [3] = extension
+    const timestampPattern = /^(.+)_(\d{10,14})\.(jpg|png)$/;
+
+    for (const projectFolder of projectFolders.prefixes) {
+        const imagesRef = projectFolder.child('images');
+        let imageFiles;
+        try {
+            imageFiles = await imagesRef.listAll();
+        } catch (e) {
+            continue; // No images folder for this project
+        }
+
+        if (imageFiles.items.length === 0) continue;
+
+        // Group timestamped files by their base name
+        const groups = {};
+        let stableFiles = 0;
+
+        for (const fileRef of imageFiles.items) {
+            const name = fileRef.name;
+            const match = name.match(timestampPattern);
+
+            if (match) {
+                const baseName = match[1];
+                const timestamp = parseInt(match[2]);
+                const ext = match[3];
+                const groupKey = baseName + '.' + ext;
+
+                if (!groups[groupKey]) groups[groupKey] = [];
+                groups[groupKey].push({ ref: fileRef, timestamp, name });
+            } else {
+                // Stable-format file (no timestamp) — always keep
+                stableFiles++;
+            }
+        }
+
+        console.log(`Project "${projectFolder.name}": ${imageFiles.items.length} files (${stableFiles} stable, ${Object.keys(groups).length} groups with timestamps)`);
+
+        // For each group: keep newest, delete all older duplicates
+        for (const [groupKey, files] of Object.entries(groups)) {
+            if (files.length <= 1) {
+                totalKept++;
+                continue;
+            }
+
+            // Sort newest first
+            files.sort((a, b) => b.timestamp - a.timestamp);
+
+            // Keep the first (newest)
+            totalKept++;
+            console.log(`  Keeping: ${files[0].name} (newest of ${files.length})`);
+
+            // Delete the rest
+            for (let i = 1; i < files.length; i++) {
+                try {
+                    await files[i].ref.delete();
+                    totalDeleted++;
+                    console.log(`  Deleted: ${files[i].name}`);
+                } catch (e) {
+                    console.warn(`  Failed to delete ${files[i].name}:`, e.message || e);
+                }
+            }
+        }
+    }
+
+    const msg = `✅ Aufräumen fertig: ${totalDeleted} Duplikate gelöscht, ${totalKept} Dateien behalten`;
+    console.log(msg);
+    if (typeof showToast === 'function') showToast(msg, 5000);
+    return totalDeleted;
+}
+
 window.REVIEW_STATUS = REVIEW_STATUS;
 window.initFirebase = initFirebase;
 window.saveToCloud = saveToCloud;
@@ -539,3 +677,4 @@ window.isFirebaseConfigured = isFirebaseConfigured;
 window.updateCloudStatus = updateCloudStatus;
 window.cleanupListeners = cleanupListeners;
 window.uploadPhotoToStorage = uploadPhotoToStorage;
+window.cleanupDuplicatePhotos = cleanupDuplicatePhotos;

@@ -108,16 +108,30 @@ const PhotoStore = (function () {
 
     // ── Save ALL photos from a project's data array into IDB ──
     // Returns a deep-copy of `dataRows` with data:image values replaced by IDB_REF.
+    // Handles both single-photo columns (string) and multi-photo columns like
+    // MK-Bild (array of data-URL strings).
     function extractAndSavePhotos(projectName, dataRows) {
         var strippedData = JSON.parse(JSON.stringify(dataRows));
         var promises = [];
         strippedData.forEach(function (row, rowIdx) {
             Object.keys(row).forEach(function (k) {
-                if (typeof row[k] === 'string' && row[k].startsWith('data:image')) {
-                    // Save the actual photo to IDB
-                    promises.push(savePhoto(projectName, rowIdx, k, row[k]));
-                    // Replace with lightweight placeholder
+                var v = row[k];
+                if (typeof v === 'string' && v.startsWith('data:image')) {
+                    // Single-photo column
+                    promises.push(savePhoto(projectName, rowIdx, k, v));
                     row[k] = IDB_REF;
+                } else if (Array.isArray(v)) {
+                    // Multi-photo column (e.g. MK-Bild): each entry may be a data URL
+                    var newArr = v.map(function (item, itemIdx) {
+                        if (typeof item === 'string' && item.startsWith('data:image')) {
+                            // Store each photo under a distinct key so they don't collide
+                            var storeKey = k + '#' + itemIdx;
+                            promises.push(savePhoto(projectName, rowIdx, storeKey, item));
+                            return IDB_REF;
+                        }
+                        return item;
+                    });
+                    row[k] = newArr;
                 }
             });
         });
@@ -127,25 +141,44 @@ const PhotoStore = (function () {
     }
 
     // ── Restore IDB_REF placeholders in a data array back to real data-URLs ──
+    // Handles both single-photo columns (string) and multi-photo columns like
+    // MK-Bild (array of data-URL strings or IDB_REF placeholders).
     function restorePhotos(projectName, dataRows) {
         var promises = [];
         dataRows.forEach(function (row, rowIdx) {
             Object.keys(row).forEach(function (k) {
-                if (row[k] === IDB_REF) {
+                var v = row[k];
+                if (v === IDB_REF) {
+                    // Single-photo column
                     promises.push(
                         loadPhoto(projectName, rowIdx, k).then(function (dataUrl) {
-                            if (dataUrl) {
-                                row[k] = dataUrl;
-                            } else {
-                                // Photo was in IDB placeholder but actual data missing
-                                row[k] = '';
-                            }
+                            row[k] = dataUrl || '';
                         })
                     );
+                } else if (Array.isArray(v)) {
+                    // Multi-photo column: restore each IDB_REF item to its stored data URL
+                    v.forEach(function (item, itemIdx) {
+                        if (item === IDB_REF) {
+                            var storeKey = k + '#' + itemIdx;
+                            promises.push(
+                                loadPhoto(projectName, rowIdx, storeKey).then(function (dataUrl) {
+                                    v[itemIdx] = dataUrl || '';
+                                })
+                            );
+                        }
+                    });
                 }
             });
         });
         return Promise.all(promises).then(function () {
+            // Clean up: remove empty entries from arrays (photos that could not be restored)
+            dataRows.forEach(function (row) {
+                Object.keys(row).forEach(function (k) {
+                    if (Array.isArray(row[k])) {
+                        row[k] = row[k].filter(function (x) { return x; });
+                    }
+                });
+            });
             return dataRows;
         });
     }

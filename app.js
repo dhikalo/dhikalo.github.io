@@ -10,7 +10,7 @@
 const DEPTHS = ['0.8', '1.6', '3.2'];
 
 const TABLE_STRUCTURE = [
-    { group: 'Basis', class: 'basis', columns: ['Kennzeichen', 'Alt-Kz.', 'Typ', 'Örtlichkeit', 'Meter [m]', 'Kommentar', 'Bodentyp', 'Datum'] },
+    { group: 'Basis', class: 'basis', columns: ['Kennzeichen', 'Alt-Kz.', 'Typ', 'Örtlichkeit', 'Meter [m]', 'Meter [m] neu', 'MK-Bild', 'Kommentar', 'Bodentyp', 'Datum'] },
     { group: '0.8m', class: '08', columns: ['Sprache_0.8', 'R1 [Ω]_0.8', 'R2 [Ω]_0.8', 'R3 [Ω]_0.8', 'ρ1 [Ωm]_0.8', 'ρ2 [Ωm]_0.8', 'ρ3 [Ωm]_0.8', 'MW [Ωm]_0.8', 'SD [Ωm]_0.8', 'Bilder_0.8'] },
     { group: '1.6m', class: '16', columns: ['Sprache_1.6', 'R1 [Ω]_1.6', 'R2 [Ω]_1.6', 'R3 [Ω]_1.6', 'ρ1 [Ωm]_1.6', 'ρ2 [Ωm]_1.6', 'ρ3 [Ωm]_1.6', 'MW [Ωm]_1.6', 'SD [Ωm]_1.6', 'Bilder_1.6'] },
     { group: '3.2m', class: '32', columns: ['R1 [Ω]_3.2', 'R2 [Ω]_3.2', 'R3 [Ω]_3.2', 'ρ1 [Ωm]_3.2', 'ρ2 [Ωm]_3.2', 'ρ3 [Ωm]_3.2', 'MW [Ωm]_3.2', 'SD [Ωm]_3.2', 'Bilder_3.2'] },
@@ -25,9 +25,9 @@ const TABLE_STRUCTURE = [
 
 const DEPTH_COLORS = {
     'basis': { bg: 'transparent', border: '#334155', text: '#94a3b8' },
-    '08': { bg: 'rgba(232,121,249,0.06)', border: '#e879f9', text: '#e879f9' },
-    '16': { bg: 'rgba(251,191,36,0.06)', border: '#fbbf24', text: '#fbbf24' },
-    '32': { bg: 'rgba(34,211,238,0.06)', border: '#22d3ee', text: '#22d3ee' },
+    '08': { bg: 'rgba(0,229,255,0.10)', border: '#00e5ff', text: '#00e5ff' },
+    '16': { bg: 'rgba(217,119,6,0.10)', border: '#d97706', text: '#d97706' },
+    '32': { bg: 'rgba(255,45,149,0.10)', border: '#ff2d95', text: '#ff2d95' },
     'zusatz': { bg: 'rgba(57,255,20,0.06)', border: '#39ff14', text: '#39ff14' },
     'potential': { bg: 'rgba(255,140,0,0.06)', border: '#ff8c00', text: '#ff8c00' },
     'spannung': { bg: 'rgba(255,0,60,0.06)', border: '#ff003c', text: '#ff003c' },
@@ -45,7 +45,7 @@ const AppState = {
     zoomLevel: 100,
     selectedCell: null,
     columnWidths: {},
-    activeColor: '#e879f9',
+    activeColor: '#00e5ff',
     liveFollow: false,
     newCols: new Set(),
     newColsPlacement: [],
@@ -71,6 +71,14 @@ let draggingTextIdx = -1;
 // ─── UTILITY FUNCTIONS ───
 const $ = (id) => document.getElementById(id);
 const on = (id, evt, cb) => { const el = $(id); if (el) el.addEventListener(evt, cb); };
+
+// Safely parse "rowIdx-colName" — column names may contain hyphens (e.g. "Alt-Kz.", "+/-")
+function parseSelectedCell(sc) {
+    if (!sc || typeof sc !== 'string') return [NaN, ''];
+    const i = sc.indexOf('-');
+    if (i === -1) return [parseInt(sc), ''];
+    return [parseInt(sc.substring(0, i)), sc.substring(i + 1)];
+}
 
 // Safely read + parse the project library from localStorage.
 // Returns {} if the key is missing or the stored JSON is corrupted,
@@ -195,7 +203,13 @@ function showToast(message, duration = 3000) {
 
     const toast = document.createElement('div');
     toast.className = 'modern-toast';
-    toast.innerHTML = `<i class="fas fa-info-circle"></i> <span>${message}</span>`;
+    // Use textContent for the message to prevent XSS injection
+    const icon = document.createElement('i');
+    icon.className = 'fas fa-info-circle';
+    const span = document.createElement('span');
+    span.textContent = ' ' + message;
+    toast.appendChild(icon);
+    toast.appendChild(span);
     document.body.appendChild(toast);
 
     requestAnimationFrame(() => toast.classList.add('show'));
@@ -628,12 +642,23 @@ async function openProjectForReview(project) {
             const localRow = localProject.data[idx] || {};
             const mergedRow = Object.assign({}, cloudRow);
             Object.keys(mergedRow).forEach(key => {
-                if (mergedRow[key] === '__IMAGE_REF__' && localRow[key] && localRow[key].startsWith('data:image')) {
-                    mergedRow[key] = localRow[key];
+                const cv = mergedRow[key];
+                const lv = localRow[key];
+                if (cv === '__IMAGE_REF__' && typeof lv === 'string' && lv.startsWith('data:image')) {
+                    mergedRow[key] = lv;
                 }
                 // Also accept IDB placeholder from local copy — it will be resolved below
-                if (mergedRow[key] === '__IMAGE_REF__' && localRow[key] === '__IDB_PHOTO__') {
+                if (cv === '__IMAGE_REF__' && lv === '__IDB_PHOTO__') {
                     mergedRow[key] = '__IDB_PHOTO__';
+                }
+                // Multi-photo columns (arrays) — per-index fallback to the local copy
+                if (Array.isArray(cv) && Array.isArray(lv)) {
+                    mergedRow[key] = cv.map(function (item, i) {
+                        const li = lv[i];
+                        if (item === '__IMAGE_REF__' && typeof li === 'string' && li.startsWith('data:image')) return li;
+                        if (item === '__IMAGE_REF__' && li === '__IDB_PHOTO__') return '__IDB_PHOTO__';
+                        return item;
+                    });
                 }
             });
             return mergedRow;
@@ -750,11 +775,17 @@ function initStabilityFeatures() {
     });
 
     // Warn before closing/navigating away with unsaved data
+    // Only prompt if there is actual user data (not just empty rows)
     window.addEventListener('beforeunload', function(e) {
         if (AppState.data && AppState.data.length > 0) {
+            const hasRealData = AppState.data.some(row =>
+                Object.keys(row).some(k => k !== '_isNew' && k !== '_originalIndex' && row[k] !== '' && row[k] !== undefined)
+            );
             try { saveToStorage(); } catch (err) { /* best effort */ }
-            e.preventDefault();
-            e.returnValue = 'Ungespeicherte Daten gehen verloren!';
+            if (hasRealData) {
+                e.preventDefault();
+                e.returnValue = 'Ungespeicherte Daten gehen verloren!';
+            }
         }
     });
 
@@ -905,7 +936,7 @@ function initUI() {
     on('btnAddRow', 'click', () => {
         pushUndo();
         if (AppState.selectedCell) {
-            const rowIndex = parseInt(AppState.selectedCell.split('-')[0]);
+            const rowIndex = parseSelectedCell(AppState.selectedCell)[0];
             AppState.data.splice(rowIndex + 1, 0, { _isNew: true });
         } else {
             AppState.data.push({ _isNew: true });
@@ -918,7 +949,7 @@ function initUI() {
     on('btnDeleteRow', 'click', () => {
         if (!AppState.selectedCell) { showToast('Bitte zuerst eine Zeile auswählen'); return; }
         pushUndo();
-        AppState.data.splice(parseInt(AppState.selectedCell.split('-')[0]), 1);
+        AppState.data.splice(parseSelectedCell(AppState.selectedCell)[0], 1);
         renderTable();
         saveToStorage();
         showToast('Zeile gelöscht');
@@ -939,7 +970,7 @@ function initUI() {
 
         // If a cell is selected, insert next to that column
         if (AppState.selectedCell && typeof AppState.selectedCell === 'string') {
-            const selectedCol = AppState.selectedCell.split('-')[1];
+            const selectedCol = parseSelectedCell(AppState.selectedCell)[1];
             for (let g of TABLE_STRUCTURE) {
                 const idx = g.columns.indexOf(selectedCol);
                 if (idx !== -1) {
@@ -979,7 +1010,7 @@ function initUI() {
 
     on('btnDeleteCol', 'click', () => {
         if (!AppState.selectedCell) { showToast('Bitte zuerst eine Spalte auswählen'); return; }
-        const colToDelete = AppState.selectedCell.split('-')[1];
+        const colToDelete = parseSelectedCell(AppState.selectedCell)[1];
         if (!colToDelete) return;
 
         if (!confirm(`Spalte "${colToDelete}" wirklich löschen?`)) return;
@@ -1030,17 +1061,17 @@ function initUI() {
     on('btnStopAudit', 'click', () => stopDrawing());
 
     // Depth markers & lines
-    on('btnMarker08', 'click', () => setMarkerByDepth('#e879f9'));
-    on('btnMarker16', 'click', () => setMarkerByDepth('#fbbf24'));
-    on('btnMarker32', 'click', () => setMarkerByDepth('#22d3ee'));
-    on('btnLine08', 'click', () => setLineByDepth('#e879f9'));
-    on('btnLine16', 'click', () => setLineByDepth('#fbbf24'));
-    on('btnLine32', 'click', () => setLineByDepth('#22d3ee'));
+    on('btnMarker08', 'click', () => setMarkerByDepth('#00e5ff'));
+    on('btnMarker16', 'click', () => setMarkerByDepth('#d97706'));
+    on('btnMarker32', 'click', () => setMarkerByDepth('#ff2d95'));
+    on('btnLine08', 'click', () => setLineByDepth('#00e5ff'));
+    on('btnLine16', 'click', () => setLineByDepth('#d97706'));
+    on('btnLine32', 'click', () => setLineByDepth('#ff2d95'));
 
     // Visibility toggles
-    on('chkFilter08', 'change', () => toggleLayerColor('#e879f9', 'chkFilter08'));
-    on('chkFilter16', 'change', () => toggleLayerColor('#fbbf24', 'chkFilter16'));
-    on('chkFilter32', 'change', () => toggleLayerColor('#22d3ee', 'chkFilter32'));
+    on('chkFilter08', 'change', () => toggleLayerColor('#00e5ff', 'chkFilter08'));
+    on('chkFilter16', 'change', () => toggleLayerColor('#d97706', 'chkFilter16'));
+    on('chkFilter32', 'change', () => toggleLayerColor('#ff2d95', 'chkFilter32'));
 
     // Numbered markers
     document.querySelectorAll('.num-btn').forEach(btn => {
@@ -1200,6 +1231,8 @@ function renderTable() {
     if (AppState.data.length === 0 && $('mainApp') && $('mainApp').style.display !== 'none') {
         for (let i = 0; i < 100; i++) AppState.data.push({});
     }
+    // Cancel any pending debounced render
+    if (renderTable._timer) { clearTimeout(renderTable._timer); renderTable._timer = null; }
 
     // Build header
     thead.innerHTML = '';
@@ -1319,9 +1352,13 @@ function renderTableBody() {
                     td.style.borderLeft = `3px solid ${cs.border}`;
                 }
 
-                if (col.toLowerCase().includes('anhang') || col.toLowerCase().includes('bilder')) {
+                if (col === 'MK-Bild') {
+                    // MK-Bild supports MULTIPLE photos (stored as an array)
                     td.style.textAlign = 'center';
-                    const isBilder = col.toLowerCase().includes('bilder');
+                    renderMkBildCell(td, originalRow, idx, col);
+                } else if (col.toLowerCase().includes('anhang') || col.toLowerCase().includes('bilder') || col === 'MK-Bild') {
+                    td.style.textAlign = 'center';
+                    const isBilder = col.toLowerCase().includes('bilder') || col === 'MK-Bild';
                     
                     if (originalRow[col] === '__IMAGE_REF__') {
                         // Placeholder left behind when a cloud upload of this photo
@@ -1374,12 +1411,24 @@ function renderTableBody() {
                         td.appendChild(imgContainer);
                     } else {
                         if (isBilder) {
+                            const btnContainer = document.createElement('div');
+                            btnContainer.style.cssText = 'display:flex;gap:2px;justify-content:center;';
+
                             const camBtn = document.createElement('button');
                             camBtn.className = 'toolbar-btn';
                             camBtn.innerHTML = '<i class="fas fa-camera"></i>';
                             camBtn.title = 'Foto aufnehmen';
                             camBtn.onclick = () => triggerCamera(idx, col);
-                            td.appendChild(camBtn);
+                            btnContainer.appendChild(camBtn);
+
+                            const uploadBtn = document.createElement('button');
+                            uploadBtn.className = 'toolbar-btn';
+                            uploadBtn.innerHTML = '<i class="fas fa-upload"></i>';
+                            uploadBtn.title = 'Foto hochladen & bearbeiten';
+                            uploadBtn.onclick = () => triggerPhotoUpload(idx, col);
+                            btnContainer.appendChild(uploadBtn);
+
+                            td.appendChild(btnContainer);
                         } else {
                             td.textContent = '-';
                             td.style.color = 'var(--text-muted)';
@@ -1415,6 +1464,55 @@ function renderTableBody() {
                         }
                     });
                     td.appendChild(micBtn16);
+                } else if (col === 'Typ') {
+                    // Dropdown for Typ column
+                    const typOptions = [
+                        { value: '', label: '— wählen —' },
+                        { value: 'MP', label: 'MP – Messproben' },
+                        { value: 'MR', label: 'MR – Mantelrohr' },
+                        { value: 'MT', label: 'MT – Mikrotunnel' },
+                        { value: 'B', label: 'B – Probeblech' },
+                        { value: 'E', label: 'E – Erder' },
+                        { value: 'I', label: 'I – Isolierkupplung' },
+                        { value: 'IF', label: 'IF – Isolierflansch' },
+                        { value: 'K', label: 'K – Fremdleitung' },
+                        { value: 'LAF', label: 'LAF – Fremdstromschutzanlage' },
+                        { value: 'LAP', label: 'LAP – Potentialverbindung' },
+                        { value: 'P', label: 'P – Potential' },
+                        { value: 'R', label: 'R – Rohrstrom' },
+                        { value: 'LAG', label: 'LAG – Galvanische Anoden' },
+                        { value: 'D', label: 'D – Dauerbezugelektrode' }
+                    ];
+                    const sel = document.createElement('select');
+                    sel.className = 'cell-input';
+                    sel.dataset.col = col;
+                    sel.dataset.row = idx;
+                    sel.style.cursor = 'pointer';
+                    typOptions.forEach(function(opt) {
+                        const o = document.createElement('option');
+                        o.value = opt.value;
+                        o.textContent = opt.label;
+                        sel.appendChild(o);
+                    });
+                    sel.value = originalRow[col] || '';
+                    // If current value is not in the list, add it
+                    if (originalRow[col] && !typOptions.some(function(o) { return o.value === originalRow[col]; })) {
+                        const extra = document.createElement('option');
+                        extra.value = originalRow[col];
+                        extra.textContent = originalRow[col];
+                        sel.appendChild(extra);
+                        sel.value = originalRow[col];
+                    }
+                    sel.onfocus = () => { AppState.selectedCell = `${idx}-${col}`; };
+                    sel.onchange = (e) => {
+                        AppState._lastLocalEditTime = Date.now();
+                        originalRow[col] = e.target.value;
+                        debouncedSave(800);
+                    };
+                    if (originalRow._isNew || AppState.newCols.has(col)) {
+                        sel.style.background = 'rgba(210, 180, 140, 0.35)';
+                    }
+                    td.appendChild(sel);
                 } else {
                     const inp = document.createElement('input');
                     inp.type = 'text';
@@ -1485,7 +1583,7 @@ function syncMapWithTable() {
 
     let activeRowIdx = -1;
     if (AppState.selectedCell) {
-        activeRowIdx = parseInt(AppState.selectedCell.split('-')[0]);
+        activeRowIdx = parseSelectedCell(AppState.selectedCell)[0];
     } else if (AppState.data && AppState.data.length > 0) {
         activeRowIdx = AppState.data.length - 1;
     }
@@ -1636,7 +1734,7 @@ function saveToStorage() {
         const starData = [];
         ['star08', 'star16', 'star32'].forEach(function(layerKey) {
             if (!layers[layerKey]) return;
-            const color = layerKey === 'star08' ? '#e879f9' : (layerKey === 'star16' ? '#fbbf24' : '#22d3ee');
+            const color = layerKey === 'star08' ? '#00e5ff' : (layerKey === 'star16' ? '#d97706' : '#ff2d95');
             const depthKey = layerKey === 'star08' ? '0.8' : (layerKey === 'star16' ? '1.6' : '3.2');
             layers[layerKey].eachLayer(function(group) {
                 // Find the center dot (circleMarker) to get the center coords
@@ -1761,9 +1859,20 @@ function _saveProjectToLocalStorageFallback(library, pName, project) {
                     var strippedAny = false;
                     (strippedProject.data || []).forEach(function(row) {
                         Object.keys(row).forEach(function(k) {
-                            if (typeof row[k] === 'string' && row[k].startsWith('data:image')) {
+                            var v = row[k];
+                            if (typeof v === 'string' && v.startsWith('data:image')) {
                                 row[k] = '';
                                 strippedAny = true;
+                            } else if (Array.isArray(v)) {
+                                // Strip inline photos from multi-photo arrays (e.g. MK-Bild)
+                                var cleaned = v.filter(function(item) {
+                                    if (typeof item === 'string' && item.startsWith('data:image')) {
+                                        strippedAny = true;
+                                        return false;
+                                    }
+                                    return true;
+                                });
+                                row[k] = cleaned;
                             }
                         });
                     });
@@ -1962,9 +2071,9 @@ if (USE_OSM) {
     const chk08 = $('chkFilter08');
     const chk16 = $('chkFilter16');
     const chk32 = $('chkFilter32');
-    if (chk08) chk08.checked = !AppState.hiddenMapColors.has('#e879f9');
-    if (chk16) chk16.checked = !AppState.hiddenMapColors.has('#fbbf24');
-    if (chk32) chk32.checked = !AppState.hiddenMapColors.has('#22d3ee');
+    if (chk08) chk08.checked = !AppState.hiddenMapColors.has('#00e5ff');
+    if (chk16) chk16.checked = !AppState.hiddenMapColors.has('#d97706');
+    if (chk32) chk32.checked = !AppState.hiddenMapColors.has('#ff2d95');
 
     // Fix: call invalidateSize after sidebar toggle to prevent coordinate offset
     const sidebar = document.querySelector('.map-sidebar');
@@ -1984,7 +2093,7 @@ if (USE_OSM) {
         
         let rowIdx = -1;
         if (AppState.selectedCell) {
-            rowIdx = parseInt(AppState.selectedCell.split('-')[0]);
+            rowIdx = parseSelectedCell(AppState.selectedCell)[0];
         } else {
             rowIdx = AppState.data.length - 1;
         }
@@ -2050,27 +2159,23 @@ if (USE_OSM) {
 
 function createPinMarker(latlng, color, customText) {
     // Count from depthMarkers array (resets when "Löschen" is clicked)
-    var depthKey = color === '#e879f9' ? '0.8' : (color === '#fbbf24' ? '1.6' : '3.2');
+    var depthKey = color === '#00e5ff' ? '0.8' : (color === '#d97706' ? '1.6' : '3.2');
     if (!AppState.depthMarkers) AppState.depthMarkers = { '0.8': [], '1.6': [], '3.2': [] };
     var count = AppState.depthMarkers[depthKey].length;
     
     var textToShow = customText !== undefined ? customText : count;
 
-    const dotSvg = `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="9" cy="9" r="7.5" fill="white" stroke="black" stroke-width="1.5"/>
-        <circle cx="9" cy="9" r="4.5" fill="${color}"/>
-    </svg>`;
     return L.marker(latlng, {
         draggable: true,
         interactive: true,
         zIndexOffset: 1000,
         markerColor: color,
         icon: L.divIcon({
-            html: `<div style="display:flex; flex-direction:column; align-items:center; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));">
-                       <div style="width:18px;height:18px;">${dotSvg}</div>
-                       <div style="background:rgba(255,255,255,0.9); color:${color}; font-size:9px; font-weight:bold; padding:0 3px; border-radius:3px; margin-top:1px;">${textToShow}</div>
+            html: `<div style="display:flex; flex-direction:column; align-items:center; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4));">
+                       <div style="width:14px;height:14px;background:${color};border:2.5px solid #fff;box-shadow:0 0 0 1.5px rgba(0,0,0,0.4);"></div>
+                       <div style="background:rgba(255,255,255,0.95); color:#000; font-size:10px; font-weight:bold; padding:1px 4px; border-radius:3px; margin-top:2px; border:1px solid ${color};">${textToShow}</div>
                    </div>`,
-            iconSize: [24, 34], iconAnchor: [12, 18], className: 'custom-marker-icon'
+            iconSize: [24, 38], iconAnchor: [12, 20], className: 'custom-marker-icon'
         })
     });
 }
@@ -2085,7 +2190,7 @@ function setupInteractiveLayer(layer) {
                 // Decrement depthMarkers counter for this color
                 var color = layer.options && layer.options.markerColor;
                 if (color && AppState.depthMarkers && layer.getLatLng && !layer.options.isNumbered && !layer.options.isDistLabel) {
-                    var depthKey = color === '#e879f9' ? '0.8' : (color === '#fbbf24' ? '1.6' : '3.2');
+                    var depthKey = color === '#00e5ff' ? '0.8' : (color === '#d97706' ? '1.6' : '3.2');
                     if (AppState.depthMarkers[depthKey] && AppState.depthMarkers[depthKey].length > 0) {
                         AppState.depthMarkers[depthKey].pop();
                     }
@@ -2176,7 +2281,7 @@ async function handleMapSearch() {
 // ─── HELPER: Find first row without coordinates ───
 function findTargetRowIdx() {
     if (AppState.selectedCell) {
-        return parseInt(AppState.selectedCell.split('-')[0]);
+        return parseSelectedCell(AppState.selectedCell)[0];
     }
     // Find first row that has no coordinates yet
     if (AppState.data && AppState.data.length > 0) {
@@ -2434,9 +2539,104 @@ function initCompass() {
     const compass = $('mapCompass');
     if (!compass) return;
 
+    // Track current heading for map rotation
+    AppState._compassHeading = 0;
+    AppState._compassManualAngle = 0;
+    if (typeof AppState._compassLocked === 'undefined') AppState._compassLocked = false;
+
+    // ── Manual rotation by dragging the compass ──
+    let isDragging = false;
+    let startAngle = 0;
+    let currentRotation = 0;
+
+    function getAngleFromCenter(clientX, clientY) {
+        const rect = compass.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        return Math.atan2(clientY - cy, clientX - cx) * (180 / Math.PI);
+    }
+
+    function applyRotation(angle) {
+        currentRotation = angle;
+        AppState._compassManualAngle = angle;
+        compass.style.transform = `rotate(${angle}deg)`;
+        // Rotate the map in opposite direction + scale to fill corners
+        if (map) {
+            const mapEl = document.getElementById('map');
+            if (mapEl) {
+                // Calculate scale needed to cover viewport when rotated
+                // At 45° we need √2 ≈ 1.42, at 0° we need 1.0
+                const absAngle = Math.abs(angle % 360);
+                const rad = (absAngle > 180 ? 360 - absAngle : absAngle) * Math.PI / 180;
+                const scale = Math.abs(Math.cos(rad)) + Math.abs(Math.sin(rad));
+                mapEl.style.transform = `rotate(${-angle}deg) scale(${scale})`;
+            }
+        }
+    }
+
+    // Mouse events
+    compass.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        isDragging = true;
+        startAngle = getAngleFromCenter(e.clientX, e.clientY) - currentRotation;
+        compass.style.cursor = 'grabbing';
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+        const angle = getAngleFromCenter(e.clientX, e.clientY) - startAngle;
+        applyRotation(angle);
+    });
+
+    document.addEventListener('mouseup', function() {
+        if (isDragging) {
+            isDragging = false;
+            compass.style.cursor = 'grab';
+        }
+    });
+
+    // Touch events
+    compass.addEventListener('touchstart', function(e) {
+        if (e.touches.length === 1) {
+            e.preventDefault();
+            isDragging = true;
+            const touch = e.touches[0];
+            startAngle = getAngleFromCenter(touch.clientX, touch.clientY) - currentRotation;
+        }
+    }, { passive: false });
+
+    document.addEventListener('touchmove', function(e) {
+        if (!isDragging) return;
+        const touch = e.touches[0];
+        const angle = getAngleFromCenter(touch.clientX, touch.clientY) - startAngle;
+        applyRotation(angle);
+    }, { passive: true });
+
+    document.addEventListener('touchend', function() {
+        isDragging = false;
+    });
+
+    // Double-click/tap to reset to North
+    compass.addEventListener('dblclick', function(e) {
+        e.preventDefault();
+        currentRotation = 0;
+        AppState._compassManualAngle = 0;
+        compass.style.transform = 'rotate(0deg)';
+        const mapEl = document.getElementById('map');
+        if (mapEl) mapEl.style.transform = '';
+        showToast('Karte zurück auf Nord');
+    });
+
+    // Device orientation (auto compass) — only if not manually rotated
     const handleOrientation = (event) => {
         let heading = event.webkitCompassHeading || (event.alpha ? 360 - event.alpha : null);
-        if (heading != null) compass.style.transform = `rotate(${-heading}deg)`;
+        if (heading != null) {
+            AppState._compassHeading = heading;
+            // Only auto-update if user is not manually dragging
+            if (!isDragging && currentRotation === 0) {
+                compass.style.transform = `rotate(${-heading}deg)`;
+            }
+        }
     };
 
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -2483,7 +2683,7 @@ function setStartPoint() {
     var lng = latlng.lng;
     var rowIdx = -1;
     if (AppState.selectedCell) {
-        rowIdx = parseInt(AppState.selectedCell.split('-')[0]);
+        rowIdx = parseSelectedCell(AppState.selectedCell)[0];
     } else if (AppState.data && AppState.data.length > 0) {
         rowIdx = AppState.data.length - 1;
     }
@@ -2525,28 +2725,28 @@ function showMeasureLine() {
 
     var center = AppState.userMarker.getLatLng();
     var depths = [
-        { dist: 0.8, color: '#e879f9', label: '0.8m' },
-        { dist: 1.6, color: '#fbbf24', label: '1.6m' },
-        { dist: 3.2, color: '#22d3ee', label: '3.2m' }
+        { dist: 0.8, color: '#00e5ff', label: '0.8m' },
+        { dist: 1.6, color: '#d97706', label: '1.6m' },
+        { dist: 3.2, color: '#ff2d95', label: '3.2m' }
     ];
 
     depths.forEach(function(d) {
         var circle = L.circle(center, {
-            radius: d.dist, color: d.color, weight: 3,
-            fillColor: d.color, fillOpacity: 0.05, dashArray: '8, 5'
+            radius: d.dist, color: d.color, weight: 6,
+            fillColor: d.color, fillOpacity: 0.05, opacity: 1.0, dashArray: '10, 6'
         }).addTo(map);
+        AppState.measureCircles.push(circle);
 
         var labelPos = L.latLng(center.lat + (d.dist / 111320), center.lng);
         var label = L.marker(labelPos, {
             interactive: false,
             zIndexOffset: 2000,
             icon: L.divIcon({
-                html: '<div style="color:' + d.color + ';font-size:14px;font-weight:900;white-space:nowrap;text-shadow:1px 1px 2px #000, -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000;">' + d.label + '</div>',
-                iconSize: [60, 22], iconAnchor: [30, 11], className: 'measure-label'
+                html: '<div style="color:' + d.color + ';font-size:13px;font-weight:800;white-space:nowrap;-webkit-text-stroke:1px rgba(0,0,0,0.8);text-shadow:0 0 4px rgba(0,0,0,0.9);">' + d.label + '</div>',
+                iconSize: [50, 18], iconAnchor: [25, 9], className: 'measure-label'
             })
         }).addTo(map);
 
-        AppState.measureCircles.push(circle);
         AppState.measureCircles.push(label);
     });
 
@@ -2577,11 +2777,11 @@ function destPoint(from, bearing, distMeters) {
 function setMarkerByDepth(color) {
     stopDrawing(true);
     if (!map) return;
-    var depthLabel = color === '#e879f9' ? '0.8m' : (color === '#fbbf24' ? '1.6m' : '3.2m');
+    var depthLabel = color === '#00e5ff' ? '0.8m' : (color === '#d97706' ? '1.6m' : '3.2m');
     
     // Auto-place star at active row coordinates if they exist
     var rowIdx = -1;
-    if (AppState.selectedCell) rowIdx = parseInt(AppState.selectedCell.split('-')[0]);
+    if (AppState.selectedCell) rowIdx = parseSelectedCell(AppState.selectedCell)[0];
     else if (AppState.data && AppState.data.length > 0) rowIdx = AppState.data.length - 1;
 
     if (rowIdx >= 0 && AppState.data[rowIdx] && AppState.data[rowIdx]['GPS-Lat'] && AppState.data[rowIdx]['GPS-Lng']) {
@@ -2665,7 +2865,7 @@ function handleStickyMarkerClick(e) {
     var lng = centerLatLng.lng;
     var rowIdx = -1;
     if (AppState.selectedCell) {
-        rowIdx = parseInt(AppState.selectedCell.split('-')[0]);
+        rowIdx = parseSelectedCell(AppState.selectedCell)[0];
     } else if (AppState.data && AppState.data.length > 0) {
         rowIdx = AppState.data.length - 1;
     }
@@ -2710,11 +2910,11 @@ function handleStickyMarkerClick(e) {
 
         var firstMarkerNum = markers.length + 1;
 
-        // Add dashed circle around the star
+        // Dashed circle around the star (tebal)
         var outermostDist = requiredDist * 3;
         var circle = L.circle(centerLatLng, {
             radius: outermostDist,
-            color: color, weight: 6, fillOpacity: 0, dashArray: '8, 8'
+            color: color, weight: 6, opacity: 1.0, fillOpacity: 0, dashArray: '10, 6'
         });
         groupLayer.addLayer(circle);
 
@@ -2747,9 +2947,9 @@ function handleStickyMarkerClick(e) {
                 // groupLayer.addLayer(xMarker);
             }
 
-            // Garis lurus putus-putus
+            // Garis lurus putus-putus (tebal)
             var line = L.polyline([centerLatLng, endLatLng], {
-                color: color, weight: 5, opacity: 1.0, dashArray: '8, 8'
+                color: color, weight: 6, opacity: 1.0, dashArray: '10, 6'
             });
             groupLayer.addLayer(line);
 
@@ -2761,8 +2961,8 @@ function handleStickyMarkerClick(e) {
                 isDistLabel: true,
                 zIndexOffset: 2000,
                 icon: L.divIcon({
-                    html: `<div style="color:${color};font-size:22px;font-weight:900;white-space:nowrap;text-shadow:-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, 0px 0px 8px #000;">` + spokeNum + `</div>`,
-                    iconSize: [60, 26], iconAnchor: [30, 13], className: 'dist-label'
+                    html: `<div style="color:${color};font-size:18px;font-weight:800;white-space:nowrap;-webkit-text-stroke:1px rgba(0,0,0,0.8);text-shadow:0 0 4px rgba(0,0,0,0.9);">` + spokeNum + `</div>`,
+                    iconSize: [44, 22], iconAnchor: [22, 11], className: 'dist-label'
                 })
             });
             groupLayer.addLayer(distLabel);
@@ -2848,7 +3048,7 @@ function activateNumberedPlacement(num) {
     stopDrawing(true);
     if (!map) return;
     AppState.activeDrawToolName = `num-${num}`;
-    AppState.activeColor = AppState.activeColor || '#e879f9';
+    AppState.activeColor = AppState.activeColor || '#3b82f6';
     $('map').style.cursor = 'crosshair';
 
     const handler = (e) => {
@@ -2886,9 +3086,9 @@ window.toggleLayerColor = function(color, btnId) {
 
     // Hide/show the entire star group (circles, lines, X markers)
     let targetLayer = null;
-    if (colorLower === '#e879f9') targetLayer = layers.star08;
-    else if (colorLower === '#fbbf24') targetLayer = layers.star16;
-    else if (colorLower === '#22d3ee') targetLayer = layers.star32;
+    if (colorLower === '#00e5ff') targetLayer = layers.star08;
+    else if (colorLower === '#d97706') targetLayer = layers.star16;
+    else if (colorLower === '#ff2d95') targetLayer = layers.star32;
 
     if (targetLayer && map) {
         if (isHidden) {
@@ -2937,9 +3137,9 @@ function refreshMapVisibility() {
     if (!map) return;
     
     const depthLayers = [
-        { color: '#e879f9', layer: layers.star08 },
-        { color: '#fbbf24', layer: layers.star16 },
-        { color: '#22d3ee', layer: layers.star32 }
+        { color: '#00e5ff', layer: layers.star08 },
+        { color: '#d97706', layer: layers.star16 },
+        { color: '#ff2d95', layer: layers.star32 }
     ];
 
     depthLayers.forEach(dl => {
@@ -2969,11 +3169,45 @@ function refreshMapVisibility() {
     });
 }
 
+// Migrate legacy depth colors from old palette to the current one so that
+// existing projects stay in sync with the visibility filters and the depth
+// handlers, even after the palette was changed.
+function migrateDepthColor(c) {
+    if (!c) return c;
+    var lc = String(c).toLowerCase();
+    if (lc === '#e879f9') return '#00e5ff'; // 0.8m: pink → aqua
+    if (lc === '#3b82f6') return '#00e5ff'; // 0.8m: earlier blue → aqua
+    if (lc === '#0066ff') return '#00e5ff'; // 0.8m: elektric blue → aqua
+    if (lc === '#fbbf24') return '#d97706'; // 1.6m: yellow → golden braun
+    if (lc === '#b45309') return '#d97706'; // 1.6m: dark amber → golden braun
+    if (lc === '#22d3ee') return '#ff2d95'; // 3.2m: cyan → magenta
+    if (lc === '#06d6f0') return '#ff2d95'; // 3.2m: bright cyan → magenta
+    return c;
+}
+
 function restoreMapDrawings() {
     const pName = ($('projectName') || {}).value;
     if (!pName) return;
     let library = getLibrarySafe();
     const project = library[pName];
+
+    // Migrate legacy colors on the stored data so the visibility filter matches
+    if (project) {
+        if (project.mapData && project.mapData.features) {
+            project.mapData.features.forEach(function (f) {
+                if (f.properties && f.properties.markerColor) {
+                    f.properties.markerColor = migrateDepthColor(f.properties.markerColor);
+                }
+            });
+        }
+        if (Array.isArray(project.starData)) {
+            project.starData.forEach(function (s) { s.color = migrateDepthColor(s.color); });
+        }
+        if (Array.isArray(project.hiddenMapColors)) {
+            project.hiddenMapColors = project.hiddenMapColors.map(migrateDepthColor);
+            AppState.hiddenMapColors = new Set(project.hiddenMapColors);
+        }
+    }
 
     // Restore freehand drawItems
     if (layers.drawItems && map && project && project.mapData) {
@@ -3036,9 +3270,9 @@ function restoreMapDrawings() {
             });
             groupLayer.addLayer(centerDot);
 
-            // Dashed outer circle
+            // Dashed outer circle (tebal)
             var circle = L.circle(centerLatLng, {
-                radius: outermostDist, color: color, weight: 3, fillOpacity: 0, dashArray: '8, 8'
+                radius: outermostDist, color: color, weight: 6, opacity: 1.0, fillOpacity: 0, dashArray: '10, 6'
             });
             groupLayer.addLayer(circle);
 
@@ -3054,7 +3288,7 @@ function restoreMapDrawings() {
                 }
 
                 var line = L.polyline([centerLatLng, endLatLng], {
-                    color: color, weight: 3, opacity: 0.8, dashArray: '4, 4'
+                    color: color, weight: 6, opacity: 1.0, dashArray: '10, 6'
                 });
                 groupLayer.addLayer(line);
 
@@ -3065,8 +3299,8 @@ function restoreMapDrawings() {
                     interactive: false,
                     zIndexOffset: 2000,
                     icon: L.divIcon({
-                        html: `<div style="color:${color};font-size:22px;font-weight:900;white-space:nowrap;text-shadow:-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, 0px 0px 8px #000;">` + spokeNum + `</div>`,
-                        iconSize: [60, 26], iconAnchor: [30, 13], className: 'dist-label'
+                        html: `<div style="color:${color};font-size:18px;font-weight:800;white-space:nowrap;-webkit-text-stroke:1px rgba(0,0,0,0.8);text-shadow:0 0 4px rgba(0,0,0,0.9);">` + spokeNum + `</div>`,
+                        iconSize: [44, 22], iconAnchor: [22, 11], className: 'dist-label'
                     })
                 });
                 groupLayer.addLayer(distLabel);
@@ -3167,7 +3401,7 @@ async function triggerAusschnitt(targetLayer) {
  * cannot handle cross-origin Google Map tiles.
  */
 async function _captureMapToCanvas(mapEl) {
-    const scale = Math.max(2, window.devicePixelRatio || 2);
+    const scale = Math.max(3, window.devicePixelRatio || 3);
     const w = mapEl.offsetWidth;
     const h = mapEl.offsetHeight;
     const canvas = document.createElement('canvas');
@@ -3444,6 +3678,117 @@ function downloadSnip() {
     showToast('Heruntergeladen');
 }
 
+// ─── MK-BILD: MULTIPLE PHOTOS ───
+// Normalize the MK-Bild cell value into an array of photo data URLs.
+function getMkBildPhotos(row) {
+    const v = row['MK-Bild'];
+    if (!v) return [];
+    if (Array.isArray(v)) return v.filter(Boolean);
+    // Legacy: single photo stored as a string, or placeholder markers
+    if (v === '__IMAGE_REF__' || v === '__IDB_PHOTO__') return [v];
+    return [v];
+}
+
+function renderMkBildCell(td, row, rowIdx, col) {
+    const photos = getMkBildPhotos(row);
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-direction:column;gap:4px;justify-content:center;align-items:center;';
+
+    // Row that holds all photo thumbnails side by side
+    const photoRow = document.createElement('div');
+    photoRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;justify-content:center;align-items:center;';
+
+    photos.forEach((photo, photoIdx) => {
+        if (photo === '__IMAGE_REF__') {
+            const span = document.createElement('span');
+            span.style.cssText = 'color:var(--text-muted);font-size:11px;';
+            span.title = 'Foto wurde in die Cloud hochgeladen, ist aber auf diesem Gerät nicht verfügbar';
+            span.innerHTML = '<i class="fas fa-cloud-slash"></i>';
+            photoRow.appendChild(span);
+            return;
+        }
+        if (photo === '__IDB_PHOTO__') {
+            const span = document.createElement('span');
+            span.style.cssText = 'color:var(--text-muted);font-size:11px;';
+            span.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            photoRow.appendChild(span);
+            return;
+        }
+
+        const imgContainer = document.createElement('div');
+        imgContainer.className = 'table-img-container';
+
+        const imgPreview = document.createElement('img');
+        imgPreview.src = photo;
+        imgPreview.className = 'table-img-preview';
+        imgPreview.title = 'Ansehen';
+        imgPreview.onerror = () => {
+            imgPreview.replaceWith(document.createRange().createContextualFragment(
+                '<span style="color:var(--danger);font-size:11px;"><i class="fas fa-triangle-exclamation"></i></span>'
+            ));
+        };
+        imgPreview.onclick = () => openImagePreview(photo);
+        imgContainer.appendChild(imgPreview);
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'toolbar-btn';
+        editBtn.innerHTML = '<i class="fas fa-edit"></i>';
+        editBtn.title = 'Foto bearbeiten';
+        editBtn.onclick = () => openMkBildEditor(photo, rowIdx, photoIdx);
+        imgContainer.appendChild(editBtn);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'toolbar-btn';
+        delBtn.style.color = 'var(--danger)';
+        delBtn.innerHTML = '<i class="fas fa-trash"></i>';
+        delBtn.title = 'Löschen';
+        delBtn.onclick = () => {
+            if (confirm('Foto löschen?')) {
+                const list = getMkBildPhotos(row);
+                list.splice(photoIdx, 1);
+                row['MK-Bild'] = list;
+                renderTable();
+                saveToStorage();
+            }
+        };
+        imgContainer.appendChild(delBtn);
+        photoRow.appendChild(imgContainer);
+    });
+
+    wrap.appendChild(photoRow);
+
+    // Add buttons (camera + upload) — always on their own row so they never get
+    // hidden/cut off, allowing more photos to be added at any time.
+    const btnContainer = document.createElement('div');
+    btnContainer.style.cssText = 'display:flex;gap:3px;justify-content:center;';
+
+    const camBtn = document.createElement('button');
+    camBtn.className = 'toolbar-btn';
+    camBtn.innerHTML = '<i class="fas fa-camera"></i><i class="fas fa-plus" style="font-size:8px;vertical-align:super;"></i>';
+    camBtn.title = photos.length ? 'Weiteres Foto aufnehmen' : 'Foto aufnehmen';
+    camBtn.onclick = () => triggerCamera(rowIdx, col);
+    btnContainer.appendChild(camBtn);
+
+    const uploadBtn = document.createElement('button');
+    uploadBtn.className = 'toolbar-btn';
+    uploadBtn.innerHTML = '<i class="fas fa-upload"></i>';
+    uploadBtn.title = photos.length ? 'Weiteres Foto hochladen' : 'Foto hochladen & bearbeiten';
+    uploadBtn.onclick = () => triggerPhotoUpload(rowIdx, col);
+    btnContainer.appendChild(uploadBtn);
+
+    wrap.appendChild(btnContainer);
+    td.appendChild(wrap);
+}
+
+// Open editor for an existing MK-Bild photo at a specific index (edit in place)
+function openMkBildEditor(dataUrl, rowIdx, photoIdx) {
+    currentBilderRow = rowIdx;
+    currentBilderCol = 'MK-Bild';
+    mkBildEditIndex = photoIdx;
+    initImageEditorCanvas(dataUrl);
+}
+
 function openImagePreview(url) {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:999999;display:flex;align-items:center;justify-content:center;cursor:pointer;';
@@ -3712,7 +4057,8 @@ async function exportExcel(opts) {
                 visibleCols.forEach(col => {
                     h1.push(col);
                     h2.push('');
-                    colDefinitions.push({ key: col, isBaseMerged: true, groupClass: g.class });
+                    const isMKBild = col === 'MK-Bild';
+                    colDefinitions.push({ key: col, isBaseMerged: true, groupClass: g.class, isImage: isMKBild, isBilder: isMKBild });
                 });
                 customCols.filter(col => !AppState.hiddenColumns.has(col)).forEach(col => {
                     h1.push(col);
@@ -3891,6 +4237,15 @@ async function exportExcel(opts) {
                 const colDef = colDefinitions[colIdx];
                 if (colDef.isImage) {
                     let imgData = d[colDef.key];
+
+                    // Multi-photo columns (e.g. MK-Bild) hold an array of photos.
+                    // The Excel export currently embeds only the FIRST photo per cell
+                    // to avoid layout breakage — the rest remain in the app.
+                    if (Array.isArray(imgData)) {
+                        imgData = imgData.find(function (x) {
+                            return typeof x === 'string' && x && x !== '__IMAGE_REF__' && x !== '__IDB_PHOTO__';
+                        }) || '';
+                    }
 
                     // Photos taken while cloud sync is active get uploaded to Firebase
                     // Storage in the background, which replaces the local base64 string
@@ -4622,7 +4977,7 @@ async function injectNativeBarChart(xlsxBuffer, depthsToExport, depthLabels, fil
         var numRows = filledData.length;
         if (numRows === 0) return xlsxBuffer;
 
-        var depthHex = { '08': 'E879F9', '16': 'FBBF24', '32': '22D3EE' };
+        var depthHex = { '08': '00E5FF', '16': 'D97706', '32': 'FF2D95' };
         var seriesXml = '';
 
         depthsToExport.forEach(function(d, di) {
@@ -4742,7 +5097,7 @@ function renderAppPlot() {
     const chartW = w - pad.left - pad.right;
     const chartH = h - pad.top - pad.bottom;
 
-    const colors = { '0.8': '#e879f9', '1.6': '#fbbf24', '3.2': '#22d3ee' };
+    const colors = { '0.8': '#00e5ff', '1.6': '#d97706', '3.2': '#ff2d95' };
 
     let maxV = 100;
     data.forEach(row => {
@@ -4958,6 +5313,9 @@ function renderAppPlot() {
 // --- IMAGE EDITOR LOGIC ---
 let currentBilderRow = -1;
 let currentBilderCol = '';
+// When editing an existing MK-Bild photo, this holds its index in the array.
+// -1 means "new photo" (append). Reset after each save.
+let mkBildEditIndex = -1;
 let imgEditorActiveTool = 'pencil';
 let isImgDrawing = false;
 let savedImgData = null;
@@ -4975,7 +5333,20 @@ let currentPath = null;
 function triggerCamera(rowIdx, colName) {
     currentBilderRow = rowIdx;
     currentBilderCol = colName;
+    mkBildEditIndex = -1; // new photo → append (for MK-Bild)
     const input = $('cameraInput');
+    if (input) {
+        input.value = '';
+        input.click();
+    }
+}
+
+// Upload an existing photo file (not camera) and open editor for annotation
+function triggerPhotoUpload(rowIdx, colName) {
+    currentBilderRow = rowIdx;
+    currentBilderCol = colName;
+    mkBildEditIndex = -1; // new photo → append (for MK-Bild)
+    const input = $('photoUploadInput');
     if (input) {
         input.value = '';
         input.click();
@@ -5012,6 +5383,15 @@ function initImageEditorCanvas(imgSrc, _retryWithoutCors) {
         }
         canvas.width = w;
         canvas.height = h;
+        
+        const maskCanvas = $('imgEditorMask');
+        if (maskCanvas) {
+            maskCanvas.width = w;
+            maskCanvas.height = h;
+            const mctx = maskCanvas.getContext('2d');
+            mctx.clearRect(0, 0, w, h);
+        }
+
         bgImage = img;
         imgAnnotations = [];
         selectedAnnotation = null;
@@ -5158,8 +5538,27 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Photo upload input (file browse, no camera capture) → opens editor for annotation
+    const uploadInput = $('photoUploadInput');
+    if (uploadInput) {
+        uploadInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                initImageEditorCanvas(event.target.result);
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    const btnApplyInpaintEl = $('btnApplyInpaint');
+    if (btnApplyInpaintEl) {
+        btnApplyInpaintEl.addEventListener('click', applyInpaint);
+    }
+
     // Tools Setup
-    const tools = ['toolPencil', 'toolHighlighter', 'toolLine', 'toolCircle', 'toolText', 'toolMove'];
+    const tools = ['toolPencil', 'toolHighlighter', 'toolLine', 'toolCircle', 'toolText', 'toolInpaintBrush', 'toolMove'];
     tools.forEach(id => {
         const btn = $(id);
         if(btn) {
@@ -5172,6 +5571,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 imgEditorActiveTool = id.replace('tool', '').toLowerCase();
                 selectedAnnotation = null;
                 redrawCanvas();
+                
+                const btnApply = $('btnApplyInpaint');
+                if (btnApply) {
+                    btnApply.style.display = imgEditorActiveTool === 'inpaintbrush' ? 'inline-block' : 'none';
+                }
             });
         }
     });
@@ -5272,7 +5676,20 @@ document.addEventListener('DOMContentLoaded', () => {
         lastImgPos = startImgPos;
         const color = $('imgEditorColor').value;
 
-        if (imgEditorActiveTool === 'pencil' || imgEditorActiveTool === 'highlighter' || imgEditorActiveTool === 'eraser') {
+        if (imgEditorActiveTool === 'inpaintbrush') {
+            const maskCanvas = $('imgEditorMask');
+            if (maskCanvas) {
+                const mctx = maskCanvas.getContext('2d');
+                mctx.lineCap = 'round';
+                mctx.lineJoin = 'round';
+                mctx.lineWidth = 30 * scale;
+                mctx.strokeStyle = 'rgba(255, 0, 0, 1)'; // Opacity is handled by the canvas CSS
+                mctx.beginPath();
+                mctx.moveTo(startImgPos.x, startImgPos.y);
+                mctx.lineTo(startImgPos.x, startImgPos.y);
+                mctx.stroke();
+            }
+        } else if (imgEditorActiveTool === 'pencil' || imgEditorActiveTool === 'highlighter' || imgEditorActiveTool === 'eraser') {
             currentPath = {
                 type: 'path',
                 points: [startImgPos],
@@ -5359,7 +5776,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const color = $('imgEditorColor').value;
         const scale = canvas.width / 1200;
 
-        if (imgEditorActiveTool === 'pencil' || imgEditorActiveTool === 'highlighter' || imgEditorActiveTool === 'eraser') {
+        if (imgEditorActiveTool === 'inpaintbrush') {
+            const maskCanvas = $('imgEditorMask');
+            if (maskCanvas) {
+                const mctx = maskCanvas.getContext('2d');
+                mctx.lineCap = 'round';
+                mctx.lineJoin = 'round';
+                mctx.lineWidth = 30 * scale;
+                mctx.strokeStyle = 'rgba(255, 0, 0, 1)';
+                mctx.beginPath();
+                mctx.moveTo(lastImgPos.x, lastImgPos.y);
+                mctx.lineTo(pos.x, pos.y);
+                mctx.stroke();
+                lastImgPos = pos;
+            }
+        } else if (imgEditorActiveTool === 'pencil' || imgEditorActiveTool === 'highlighter' || imgEditorActiveTool === 'eraser') {
             if (currentPath) {
                 currentPath.points.push(pos);
                 ctx.lineCap = 'round';
@@ -5443,7 +5874,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const pos = getPos(e);
         const color = $('imgEditorColor').value;
 
-        if (imgEditorActiveTool === 'pencil' || imgEditorActiveTool === 'highlighter' || imgEditorActiveTool === 'eraser') {
+        if (imgEditorActiveTool === 'inpaintbrush') {
+            // Nothing to do for mask on mouse up
+        } else if (imgEditorActiveTool === 'pencil' || imgEditorActiveTool === 'highlighter' || imgEditorActiveTool === 'eraser') {
             if (currentPath) {
                 imgAnnotations.push(currentPath);
                 currentPath = null;
@@ -5514,7 +5947,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (currentBilderRow > -1 && currentBilderCol) {
-                AppState.data[currentBilderRow][currentBilderCol] = dataUrl;
+                if (currentBilderCol === 'MK-Bild') {
+                    // MK-Bild holds an array of photos
+                    const row = AppState.data[currentBilderRow];
+                    const list = getMkBildPhotos(row);
+                    if (mkBildEditIndex > -1 && mkBildEditIndex < list.length) {
+                        list[mkBildEditIndex] = dataUrl; // edit existing in place
+                    } else {
+                        list.push(dataUrl); // append new photo
+                    }
+                    row['MK-Bild'] = list;
+                    mkBildEditIndex = -1;
+                } else {
+                    AppState.data[currentBilderRow][currentBilderCol] = dataUrl;
+                }
                 saveToStorage();
                 renderTable();
                 // Cloud upload for this photo is already handled by
@@ -5700,7 +6146,35 @@ function applyIncomingCloudData(pName, data, _attempt) {
         return;
     }
 
-    AppState.data = data.data;
+    // ── Merge cloud data with local photo references ──
+    // Cloud data may have '__IMAGE_REF__' (photo upload succeeded or failed) while
+    // this device still has the original photo in IndexedDB ('__IDB_PHOTO__') or
+    // even inline as a data:image. Preserve the local copy so photos don't vanish.
+    const localData = AppState.data || [];
+    const cloudData = data.data || [];
+    const mergedData = cloudData.map(function (cloudRow, idx) {
+        const localRow = localData[idx] || {};
+        const merged = Object.assign({}, cloudRow);
+        Object.keys(merged).forEach(function (key) {
+            // Multi-photo columns: per-index fallback to local copy
+            if (Array.isArray(merged[key]) && Array.isArray(localRow[key])) {
+                merged[key] = merged[key].map(function (item, i) {
+                    var li = localRow[key][i];
+                    if (item === '__IMAGE_REF__' && typeof li === 'string' && li.startsWith('data:image')) return li;
+                    if (item === '__IMAGE_REF__' && li === '__IDB_PHOTO__') return '__IDB_PHOTO__';
+                    return item;
+                });
+                return;
+            }
+            if (merged[key] === '__IMAGE_REF__') {
+                if (localRow[key] === '__IDB_PHOTO__' || (typeof localRow[key] === 'string' && localRow[key].startsWith('data:image'))) {
+                    merged[key] = localRow[key];
+                }
+            }
+        });
+        return merged;
+    });
+    AppState.data = mergedData;
     // Merge new columns if any
     restoreNewColumns(data);
 
@@ -5708,7 +6182,7 @@ function applyIncomingCloudData(pName, data, _attempt) {
     const lib = getLibrarySafe();
     if (!lib[pName]) lib[pName] = {};
     lib[pName].name = pName;
-    lib[pName].data = data.data;
+    lib[pName].data = mergedData;
     lib[pName].mapData = data.mapData || null;
     lib[pName].starData = data.starData || [];
     lib[pName].hiddenMapColors = data.hiddenMapColors || [];
@@ -5720,6 +6194,27 @@ function applyIncomingCloudData(pName, data, _attempt) {
 
     // Re-render
     renderTable();
+
+    // ── Restore photos from IndexedDB after cloud sync ──
+    // Cloud data may contain '__IDB_PHOTO__' placeholders (if local device
+    // originally took the photos) or '__IMAGE_REF__' (cloud placeholder).
+    // For '__IDB_PHOTO__', fetch the real data from IndexedDB and re-render.
+    if (typeof PhotoStore !== 'undefined' && PhotoStore.isAvailable()) {
+        var hasIdbRefs = AppState.data.some(function (row) {
+            return Object.values(row).some(function (v) { return v === PhotoStore.IDB_REF; });
+        });
+        if (hasIdbRefs) {
+            PhotoStore.restorePhotos(pName, AppState.data)
+                .then(function () {
+                    renderTable();
+                    console.log('PhotoStore: photos restored after cloud sync');
+                })
+                .catch(function (err) {
+                    console.error('PhotoStore: restore after cloud sync failed', err);
+                });
+        }
+    }
+
     if (map) {
         restoreMapDrawings();
     }
@@ -6037,7 +6532,7 @@ function startRowVoiceDictation(rowIdx, micBtn, depth) {
     // Determine which column to fill based on selected cell, default to seq[0]
     let targetCol = seq[0];
     if (AppState.selectedCell) {
-        const selCol = AppState.selectedCell.split('-').slice(1).join('-');
+        const selCol = parseSelectedCell(AppState.selectedCell)[1];
         if (selCol && selCol.includes('[Ω]')) {
             targetCol = selCol;
         }
@@ -6210,21 +6705,187 @@ function updateVoiceHUDMessage(msg) {
     if (el) el.textContent = msg;
 }
 
-// Old toolbar button → start dictation on first empty/selected row
-function openVoiceDictation() {
-    let rowIdx = -1;
-    if (AppState.selectedCell) {
-        rowIdx = parseInt(AppState.selectedCell.split('-')[0]);
-    } else {
-        rowIdx = AppState.data.findIndex(row => !row['R1 [Ω]_0.8'] && !row['R2 [Ω]_0.8'] && !row['R3 [Ω]_0.8']);
-        if (rowIdx < 0) rowIdx = 0;
-    }
-    if (rowIdx < 0) { showToast('Bitte zuerst eine Zeile auswählen'); return; }
-    const micBtn = document.querySelector(`.row-mic-btn[data-row="${rowIdx}"]`);
-    startRowVoiceDictation(rowIdx, micBtn);
+// ===== INPAINTING (MAGIC ERASER) ENGINE =====
+
+function applyInpaint() {
+    const maskCanvas = $('imgEditorMask');
+    const mainCanvas = $('imgEditorCanvas');
+    if (!maskCanvas || !mainCanvas || !bgImage) return;
+    
+    showToast('Inpainting wird angewendet...', 2000);
+    
+    setTimeout(() => {
+        try {
+            const w = mainCanvas.width;
+            const h = mainCanvas.height;
+            const tmpCanvas = document.createElement('canvas');
+            tmpCanvas.width = w;
+            tmpCanvas.height = h;
+            const tmpCtx = tmpCanvas.getContext('2d', { willReadFrequently: true });
+            tmpCtx.drawImage(bgImage, 0, 0, w, h);
+            
+            const imgData = tmpCtx.getImageData(0, 0, w, h);
+            const mctx = maskCanvas.getContext('2d', { willReadFrequently: true });
+            const maskImageData = mctx.getImageData(0, 0, w, h);
+            
+            const resultData = performInpainting(imgData, maskImageData, w, h);
+            tmpCtx.putImageData(resultData, 0, 0);
+            
+            const newImg = new Image();
+            newImg.onload = () => {
+                bgImage = newImg;
+                mctx.clearRect(0, 0, w, h);
+                redrawCanvas();
+                showToast('Linien erfolgreich entfernt!');
+            };
+            newImg.src = tmpCanvas.toDataURL('image/png');
+        } catch (err) {
+            console.error(err);
+            showToast('Fehler: ' + err.message);
+        }
+    }, 50);
 }
 
-window.openVoiceDictation = openVoiceDictation;
-window.startRowVoiceDictation = startRowVoiceDictation;
-window.stopRowVoiceDictation = stopRowVoiceDictation;
+function performInpainting(imgData, maskImageData, w, h) {
+    const maskPixels = maskImageData.data;
+    const mask = new Uint8Array(w * h);
+    const originalMask = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+        let isMasked = maskPixels[i * 4 + 3] > 20 ? 1 : 0;
+        mask[i] = isMasked;
+        originalMask[i] = isMasked;
+    }
 
+    const pixels = imgData.data;
+    const result = new Uint8Array(w * h * 4);
+    for (let i = 0; i < w * h * 4; i++) {
+        result[i] = pixels[i];
+    }
+
+    const dist = computeDistanceField(mask, w, h);
+
+    const maskedPixels = [];
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            if (mask[y * w + x] === 1) {
+                maskedPixels.push({ x, y, d: dist[y * w + x] });
+            }
+        }
+    }
+    maskedPixels.sort((a, b) => a.d - b.d);
+
+    const patchRadius = 3;
+    const searchRadius = 60;
+    const numSamples = 40;
+
+    for (const px of maskedPixels) {
+        const { x, y } = px;
+        
+        let bestSSD = Infinity;
+        let bestColor = [0, 0, 0];
+
+        for (let s = 0; s < numSamples; s++) {
+            let dx = Math.floor(Math.random() * (searchRadius * 2 + 1)) - searchRadius;
+            let dy = Math.floor(Math.random() * (searchRadius * 2 + 1)) - searchRadius;
+            
+            if (Math.abs(dx) < 8 && Math.abs(dy) < 8) continue;
+            
+            let sx = x + dx;
+            let sy = y + dy;
+            
+            if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
+            if (originalMask[sy * w + sx] === 1) continue;
+
+            let ssd = 0;
+            let validPixels = 0;
+
+            for (let py = -patchRadius; py <= patchRadius; py++) {
+                for (let pxx = -patchRadius; pxx <= patchRadius; pxx++) {
+                    let nx = x + pxx;
+                    let ny = y + py;
+                    let nsx = sx + pxx;
+                    let nsy = sy + py;
+
+                    if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+                    if (nsx < 0 || nsx >= w || nsy < 0 || nsy >= h) continue;
+
+                    if (mask[ny * w + nx] === 0) {
+                        let idx1 = (ny * w + nx) * 4;
+                        let idx2 = (nsy * w + nsx) * 4;
+                        
+                        let dr = result[idx1] - result[idx2];
+                        let dg = result[idx1 + 1] - result[idx2 + 1];
+                        let db = result[idx1 + 2] - result[idx2 + 2];
+                        
+                        ssd += dr*dr + dg*dg + db*db;
+                        validPixels++;
+                    }
+                }
+            }
+
+            if (validPixels > 0) {
+                ssd /= validPixels;
+                if (ssd < bestSSD) {
+                    bestSSD = ssd;
+                    let srcIdx = (sy * w + sx) * 4;
+                    bestColor = [result[srcIdx], result[srcIdx+1], result[srcIdx+2]];
+                }
+            }
+        }
+
+        let idx = (y * w + x) * 4;
+        result[idx] = bestColor[0];
+        result[idx+1] = bestColor[1];
+        result[idx+2] = bestColor[2];
+        result[idx+3] = 255;
+        mask[y * w + x] = 0;
+    }
+
+    const outImageData = new ImageData(w, h);
+    outImageData.data.set(result);
+    return outImageData;
+}
+
+function computeDistanceField(mask, w, h) {
+    const dist = new Float32Array(w * h).fill(Infinity);
+    const queue = [];
+
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            if (mask[y * w + x] === 0) continue;
+
+            let isBoundary = false;
+            for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+                const nx = x + dx, ny = y + dy;
+                if (nx < 0 || nx >= w || ny < 0 || ny >= h || mask[ny * w + nx] === 0) {
+                    isBoundary = true;
+                    break;
+                }
+            }
+
+            if (isBoundary) {
+                dist[y * w + x] = 1;
+                queue.push([x, y]);
+            }
+        }
+    }
+
+    let qi = 0;
+    while (qi < queue.length) {
+        const [x, y] = queue[qi++];
+        const d = dist[y * w + x];
+
+        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+            if (mask[ny * w + nx] === 0) continue;
+
+            const nd = d + 1;
+            if (nd < dist[ny * w + nx]) {
+                dist[ny * w + nx] = nd;
+                queue.push([nx, ny]);
+            }
+        }
+    }
+    return dist;
+}
